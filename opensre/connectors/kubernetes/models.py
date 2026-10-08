@@ -68,6 +68,15 @@ class PodLogs(BaseModel):
     truncation: str
 
 
+class DeploymentDetail(BaseModel):
+    name: str
+    namespace: str
+    strategy: str | None
+    containers: list[Container]
+    conditions: list[Condition]
+    cut: dict[str, int] = Field(default_factory=dict)
+
+
 class PodDetail(BaseModel):
     name: str
     namespace: str

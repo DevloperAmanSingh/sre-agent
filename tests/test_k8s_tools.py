@@ -148,3 +148,56 @@ def test_list_deployments_reports_replica_counts():
         "available": 1,
         "updated": 2,
     }
+
+
+def test_describe_deployment_shows_strategy_conditions_and_only_env_secret_names():
+    obj = k.V1Deployment(
+        metadata=k.V1ObjectMeta(name="checkout", namespace="production"),
+        spec=k.V1DeploymentSpec(
+            selector=k.V1LabelSelector(),
+            strategy=k.V1DeploymentStrategy(type="RollingUpdate"),
+            template=k.V1PodTemplateSpec(
+                spec=k.V1PodSpec(
+                    containers=[
+                        k.V1Container(
+                            name="app",
+                            image="app:2",
+                            env=[
+                                k.V1EnvVar(name="TOKEN", value="secret-value"),
+                                k.V1EnvVar(
+                                    name="PASSWORD",
+                                    value_from=k.V1EnvVarSource(
+                                        secret_key_ref=k.V1SecretKeySelector(
+                                            name="credentials", key="password"
+                                        )
+                                    ),
+                                ),
+                            ],
+                            env_from=[
+                                k.V1EnvFromSource(
+                                    secret_ref=k.V1SecretEnvSource(name="environment")
+                                )
+                            ],
+                        )
+                    ]
+                )
+            ),
+        ),
+        status=k.V1DeploymentStatus(
+            conditions=[
+                k.V1DeploymentCondition(
+                    type="Available", status="False", reason="MinimumReplicasUnavailable"
+                )
+            ]
+        ),
+    )
+    result = invoke(
+        connector(read_namespaced_deployment=lambda **kwargs: obj),
+        "k8s_describe_deployment",
+        name="checkout",
+    )
+    assert result.strategy == "RollingUpdate"
+    assert result.containers[0].env_names == ["TOKEN", "PASSWORD"]
+    assert result.containers[0].secret_names == ["credentials", "environment"]
+    assert result.conditions[0].reason == "MinimumReplicasUnavailable"
+    assert "secret-value" not in result.model_dump_json()

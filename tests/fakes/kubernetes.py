@@ -24,10 +24,12 @@ def connector(**methods):
     )
 
 
-def invoke(connector, name, **args):
-    tool = next(tool for tool in connector.tools() if tool.name == name)
+def invoke(connector, tool_name, **args):
+    tool = next(tool for tool in connector.tools() if tool.name == tool_name)
     assert tool.metadata == {"read_only": True}
-    return tool.invoke({"name": name, "args": args, "id": "read", "type": "tool_call"}).artifact
+    return tool.invoke(
+        {"name": tool_name, "args": args, "id": "read", "type": "tool_call"}
+    ).artifact
 
 
 def pod(statuses=(), phase="Running", created=NOW):

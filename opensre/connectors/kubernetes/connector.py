@@ -10,6 +10,8 @@ from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.client import create_client
 from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
 from opensre.connectors.kubernetes.health import check_kube
+from opensre.connectors.kubernetes.reader import KubeReader
+from opensre.connectors.kubernetes.tools import read_tools
 from opensre.domain import CheckResult, QuickCheck
 
 
@@ -67,7 +69,10 @@ class KubernetesConnector:
                 raise ToolException(f"Namespace read failed: {exc}") from exc
 
         k8s_list_namespaces.metadata = {"read_only": True}
-        return [k8s_list_namespaces]
+        return [
+            k8s_list_namespaces,
+            *read_tools(KubeReader(self.settings, self.client_factory), self.core_factory),
+        ]
 
     def checks(self) -> list[QuickCheck]:
         return []

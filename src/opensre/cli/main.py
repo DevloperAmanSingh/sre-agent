@@ -1,10 +1,13 @@
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
+from rich.console import Console
+from rich.table import Table
 
-from opensre.config import ConfigError, load_settings
+from opensre.config import ConfigError, Settings, load_settings
+from opensre.doctor import check_kube
 
 app = typer.Typer(name="opensre", help="Read-only Kubernetes SRE assistant.")
 
@@ -37,3 +40,13 @@ def main(
     except ConfigError as exc:
         typer.echo(f"Invalid config: {exc}", err=True)
         raise typer.Exit(2) from exc
+
+
+@app.command()
+def doctor(ctx: typer.Context) -> None:
+    settings = cast(Settings, ctx.obj)
+    result = check_kube(settings.kube)
+    table = Table("Check", "Status", "Detail")
+    table.add_row(result.name, "PASS" if result.ok else "FAIL", result.detail)
+    Console().print(table)
+    raise typer.Exit(0 if result.ok else 1)

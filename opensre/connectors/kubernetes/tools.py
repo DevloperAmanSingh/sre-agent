@@ -9,6 +9,7 @@ from opensre.connectors.kubernetes.details import as_list, conditions, container
 from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.redaction import redact
 from opensre.connectors.kubernetes.workloads import workload_tools
 from opensre.output import cap_text
 
@@ -105,7 +106,7 @@ def read_tools(
             )
             if container:
                 kwargs["container"] = container
-            text = str(core_factory(api).read_namespaced_pod_log(**kwargs) or "")
+            text = redact(str(core_factory(api).read_namespaced_pod_log(**kwargs) or "")) or ""
             shown = 16000
             result = PodLogs(
                 text=cap_text(text, shown),
@@ -145,7 +146,8 @@ def read_tools(
                 limit,
                 lambda event: EventSummary(
                     type=event.type,
-                    reason=event.reason,
+                    reason=redact(event.reason),
+                    message=redact(event.message),
                     object=f"{event.involved_object.kind}/{event.involved_object.name}",
                     count=event.count or 1,
                     last_seen=event_time(event),

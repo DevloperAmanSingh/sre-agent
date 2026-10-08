@@ -89,6 +89,7 @@ class DeploymentSummary(BaseModel):
 
 
 class EventSummary(BaseModel):
+    message: str | None
     type: str | None
     reason: str | None
     object: str

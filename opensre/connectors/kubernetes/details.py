@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from opensre.connectors.kubernetes.models import Condition, Container, Probe, Termination
+from opensre.connectors.kubernetes.redaction import redact
 
 
 def event_time(event: Any) -> datetime | None:
@@ -19,7 +20,7 @@ def as_list(value: Any) -> list[Any]:
 
 def conditions(items: list[Any] | None) -> list[Condition]:
     return [
-        Condition(type=item.type, status=item.status, reason=item.reason)
+        Condition(type=item.type, status=item.status, reason=redact(item.reason))
         for item in (items or [])[:50]
     ]
 
@@ -28,7 +29,9 @@ def termination(state: Any) -> Termination | None:
     term = getattr(state, "terminated", None)
     if not term:
         return None
-    return Termination(reason=term.reason, exit_code=term.exit_code, finished_at=term.finished_at)
+    return Termination(
+        reason=redact(term.reason), exit_code=term.exit_code, finished_at=term.finished_at
+    )
 
 
 def container_details(spec: Any, status: Any = None) -> Container:
@@ -73,7 +76,7 @@ def container_details(spec: Any, status: Any = None) -> Container:
         limits=(resources.limits or {}) if resources else {},
         probes=probes,
         cut={"env_names": max(0, len(env) - 50), "secret_names": max(0, len(secrets) - 50)},
-        state=waiting.reason
+        state=redact(waiting.reason)
         if waiting
         else (
             current.reason if current else ("Running" if getattr(state, "running", None) else None)

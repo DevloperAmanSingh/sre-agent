@@ -5,6 +5,7 @@ from typing import Any
 from opensre.connectors.kubernetes.details import as_list, event_time, termination
 from opensre.connectors.kubernetes.models import Termination
 from opensre.connectors.kubernetes.reader import KubeReader
+from opensre.connectors.kubernetes.redaction import redact
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
 from opensre.output import cap_text
 
@@ -23,10 +24,10 @@ def finding(
     resource = f"pod/{pod.metadata.namespace}/{pod.metadata.name}"
     return Finding(
         resource=resource,
-        reason=reason,
-        summary=f"{resource}: {reason}",
+        reason=redact(reason) or "Unknown",
+        summary=redact(f"{resource}: {reason}") or "Unknown",
         severity=severity,
-        evidence=[Evidence(source=source, detail=detail)],
+        evidence=[Evidence(source=source, detail=redact(detail) or "")],
     )
 
 

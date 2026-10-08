@@ -7,6 +7,7 @@ from pydantic import Field
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details
 from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.redaction import redact
 
 
 def label_selector(selector: Any) -> str:
@@ -106,7 +107,7 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
                 specs = as_list(replica.spec.template.spec.containers)
                 return Revision(
                     revision=int(value) if value.isdigit() else None,
-                    change_cause=annotations.get("kubernetes.io/change-cause"),
+                    change_cause=redact(annotations.get("kubernetes.io/change-cause")),
                     images=[spec.image for spec in specs[:50]],
                     images_cut=max(0, len(specs) - 50),
                 )

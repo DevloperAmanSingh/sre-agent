@@ -159,6 +159,7 @@ def test_restart_warning_requires_recent_failed_termination_not_lifetime_count(
         ("Readiness probe failed: connection refused", "pod-1", 5, 1),
         ("Liveness probe failed: timeout", "pod-1", 5, 1),
         ("Startup probe failed: timeout", "pod-1", 5, 1),
+        ("Readiness probe failed: token=synthetic-secret", "pod-1", 5, 1),
         ("Readiness probe failed", "old-pod", 5, 0),
         ("Readiness probe failed", "pod-1", 61, 0),
         ("Failed mount", "pod-1", 5, 0),
@@ -177,4 +178,7 @@ def test_probe_failures_only_use_recent_events_for_current_pods(message, uid, mi
         assert findings[0].severity == "warning"
         assert findings[0].reason == "ProbeFailure"
         assert findings[0].evidence[0].source == "k8s_list_events"
-        assert message in findings[0].evidence[0].detail
+        from opensre.connectors.kubernetes.redaction import redact
+
+        assert redact(message) in findings[0].evidence[0].detail
+        assert "synthetic-secret" not in findings[0].model_dump_json()

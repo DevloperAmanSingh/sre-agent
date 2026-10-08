@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from test_memory_store import NOW
 from typer.testing import CliRunner
@@ -40,9 +42,30 @@ def test_feedback_flags_and_note(seeded_store, flags, exit_code):
         assert incident.feedback_at == NOW
     else:
         assert incident.status == "unconfirmed"
+
+
+def test_feedback_unknown_id(seeded_store):
     result = CliRunner().invoke(app, ["feedback", "999", "--right"])
     assert result.exit_code == 1
     assert "Unknown incident #999" in result.stderr
+
+
+def test_memory_list_and_prune(seeded_store):
+    result = CliRunner().invoke(app, ["memory", "list", "--limit", "1", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)[0]["id"] == 1
+    result = CliRunner().invoke(app, ["memory", "prune", "--older-than", "90d"])
+    assert result.exit_code == 0, result.output
+    assert "Pruned 0" in result.stdout
+    assert len(seeded_store.list_recent()) == 1
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["list", "--limit", "0"], ["prune", "--older-than", "bad"], ["prune", "--older-than", "0d"]],
+)
+def test_memory_invalid_arguments(args):
+    assert CliRunner().invoke(app, ["memory", *args]).exit_code == 2
 
 
 def test_remember_command_uses_configured_directory(tmp_path, monkeypatch):

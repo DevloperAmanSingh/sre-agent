@@ -45,6 +45,15 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class NodeSummary(BaseModel):
+    name: str
+    ready: bool
+    pressure: dict[str, str]
+    capacity: dict[str, str]
+    allocatable: dict[str, str]
+    version: str | None
+
+
 class ServicePort(BaseModel):
     name: str | None
     port: int

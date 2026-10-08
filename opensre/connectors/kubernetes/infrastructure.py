@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list
-from opensre.connectors.kubernetes.models import ServicePort, ServiceSummary
+from opensre.connectors.kubernetes.models import NodeSummary, ServicePort, ServiceSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 
 
@@ -59,4 +59,40 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
         result = reader.read(read)
         return result.model_dump_json(), result
 
-    return [k8s_list_services]
+    @tool(response_format="content_and_artifact")
+    def k8s_list_nodes(
+        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    ) -> tuple[str, Page[NodeSummary]]:
+        """Read node readiness, pressure conditions, capacity, allocatable and kubelet version."""
+
+        def read(api: Any) -> Page[NodeSummary]:
+            page = core_factory(api).list_node(
+                limit=limit, _request_timeout=reader.settings.request_timeout_s
+            )
+
+            def summarize(node: Any) -> NodeSummary:
+                condition_map = {
+                    condition.type: condition.status
+                    for condition in as_list(node.status.conditions)
+                }
+                return NodeSummary(
+                    name=node.metadata.name,
+                    ready=condition_map.get("Ready") == "True",
+                    pressure={
+                        key: value
+                        for key, value in condition_map.items()
+                        if key.endswith("Pressure")
+                    },
+                    capacity=node.status.capacity or {},
+                    allocatable=node.status.allocatable or {},
+                    version=node.status.node_info.kubelet_version
+                    if node.status.node_info
+                    else None,
+                )
+
+            return bounded_page(page, limit, summarize)
+
+        result = reader.read(read)
+        return result.model_dump_json(), result
+
+    return [k8s_list_services, k8s_list_nodes]

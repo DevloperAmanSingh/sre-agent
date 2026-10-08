@@ -232,3 +232,35 @@ def test_list_services_counts_ready_endpoints_and_reports_ports():
     assert row.selector == {"app": "checkout"}
     assert row.ports[0].port == 80
     assert row.ports[0].target_port == 8080
+
+
+def test_list_nodes_reports_readiness_pressure_resources_and_version():
+    obj = k.V1Node(
+        metadata=k.V1ObjectMeta(name="worker"),
+        status=k.V1NodeStatus(
+            conditions=[
+                k.V1NodeCondition(type="Ready", status="True"),
+                k.V1NodeCondition(type="MemoryPressure", status="True"),
+            ],
+            capacity={"cpu": "4"},
+            allocatable={"cpu": "3"},
+            node_info=k.V1NodeSystemInfo(
+                architecture="arm64",
+                boot_id="boot",
+                container_runtime_version="containerd",
+                kernel_version="kernel",
+                kube_proxy_version="proxy",
+                kubelet_version="v1.35.0",
+                machine_id="machine",
+                operating_system="linux",
+                os_image="linux",
+                system_uuid="uuid",
+            ),
+        ),
+    )
+    row = invoke(connector(list_node=lambda **kwargs: page([obj])), "k8s_list_nodes").items[0]
+    assert row.ready is True
+    assert row.pressure == {"MemoryPressure": "True"}
+    assert row.capacity == {"cpu": "4"}
+    assert row.allocatable == {"cpu": "3"}
+    assert row.version == "v1.35.0"

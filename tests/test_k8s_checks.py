@@ -3,6 +3,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 from fakes.kubernetes import NOW, connector, container_status, page, pod
+from kubernetes import client as k
 
 
 def run_rule(target, name):
@@ -61,3 +62,33 @@ def test_image_pull_failures_are_critical(reason, expected):
     if expected:
         assert findings[0].severity == "critical"
         assert findings[0].reason == reason
+
+
+def event(
+    reason="FailedScheduling", uid="pod-1", minutes=5, message="0/2 nodes: insufficient memory"
+):
+    return k.CoreV1Event(
+        metadata=k.V1ObjectMeta(name="event", namespace="production"),
+        involved_object=k.V1ObjectReference(kind="Pod", name="checkout", uid=uid),
+        type="Warning",
+        reason=reason,
+        message=message,
+        last_timestamp=NOW - timedelta(minutes=minutes),
+    )
+
+
+@pytest.mark.parametrize(
+    "uid,minutes,expected",
+    [("pod-1", 5, "FailedScheduling"), ("old-pod", 5, "Pending"), ("pod-1", 61, "Pending")],
+)
+def test_pending_includes_current_scheduling_event_reason(uid, minutes, expected):
+    target = connector(
+        list_namespaced_pod=lambda **kwargs: page([pod(phase="Pending")]),
+        list_namespaced_event=lambda **kwargs: page([event(uid=uid, minutes=minutes)]),
+    )
+    finding = run_rule(target, "pending")[0]
+    assert finding.severity == "warning"
+    assert finding.reason == expected
+    if expected == "FailedScheduling":
+        assert "insufficient memory" in finding.evidence[0].detail
+        assert finding.evidence[0].source == "k8s_list_events"

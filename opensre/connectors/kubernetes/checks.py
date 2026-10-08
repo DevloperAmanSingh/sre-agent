@@ -2,10 +2,11 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from opensre.connectors.kubernetes.details import as_list, termination
+from opensre.connectors.kubernetes.details import as_list, event_time, termination
 from opensre.connectors.kubernetes.models import Termination
 from opensre.connectors.kubernetes.reader import KubeReader
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
+from opensre.output import cap_text
 
 
 def statuses(pod: Any) -> list[Any]:
@@ -68,36 +69,88 @@ def oom(pod: Any, now: datetime) -> list[Finding]:
     ]
 
 
+def pod_events(pod: Any, events: list[Any], now: datetime) -> list[Any]:
+    return [
+        event
+        for event in events
+        if event.involved_object.kind == "Pod"
+        and event.involved_object.name == pod.metadata.name
+        and event.metadata.namespace == pod.metadata.namespace
+        and (not event.involved_object.uid or event.involved_object.uid == pod.metadata.uid)
+        and recent(event_time(event), now)
+    ]
+
+
+def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
+    if pod.status.phase != "Pending":
+        return []
+    scheduling = [
+        event for event in pod_events(pod, events, now) if event.reason == "FailedScheduling"
+    ]
+    if scheduling:
+        event = max(scheduling, key=lambda item: event_time(item) or now)
+        return [
+            finding(
+                pod,
+                event.reason,
+                cap_text(event.message or event.reason, 2000),
+                Severity.WARNING,
+                "k8s_list_events",
+            )
+        ]
+    condition = next(
+        (
+            condition
+            for condition in as_list(pod.status.conditions)
+            if condition.type == "PodScheduled" and condition.status == "False"
+        ),
+        None,
+    )
+    reason = condition.reason if condition and condition.reason else "Pending"
+    return [
+        finding(
+            pod, reason, "Pod is Pending; no recent scheduling event available", Severity.WARNING
+        )
+    ]
+
+
 class Snapshot:
     def __init__(self, reader: KubeReader, core_factory: Callable[[Any], Any]) -> None:
         self.reader = reader
         self.core_factory = core_factory
         self._pods: list[Any] | None = None
+        self._events: list[Any] | None = None
+
+    def pages(self, method: Callable[..., Any]) -> list[Any]:
+        items: list[Any] = []
+        token = ""
+        seen: set[str] = set()
+        while True:
+            kwargs: dict[str, Any] = dict(
+                namespace=self.reader.settings.namespace,
+                limit=100,
+                _request_timeout=self.reader.settings.request_timeout_s,
+            )
+            if token:
+                kwargs["_continue"] = token
+            page = method(**kwargs)
+            items.extend(page.items)
+            token = page.metadata._continue or ""
+            if not token:
+                return items
+            if token in seen:
+                raise ValueError("Kubernetes pagination repeated a continuation token")
+            seen.add(token)
 
     def pods(self, api: Any) -> list[Any]:
         if self._pods is None:
-            core = self.core_factory(api)
-            items: list[Any] = []
-            token = ""
-            seen: set[str] = set()
-            while True:
-                kwargs: dict[str, Any] = dict(
-                    namespace=self.reader.settings.namespace,
-                    limit=100,
-                    _request_timeout=self.reader.settings.request_timeout_s,
-                )
-                if token:
-                    kwargs["_continue"] = token
-                page = core.list_namespaced_pod(**kwargs)
-                items.extend(page.items)
-                token = page.metadata._continue or ""
-                if not token:
-                    break
-                if token in seen:
-                    raise ValueError("Kubernetes pagination repeated a continuation token")
-                seen.add(token)
-            self._pods = items
+            self._pods = self.pages(self.core_factory(api).list_namespaced_pod)
         return self._pods
+
+    def events(self, api: Any) -> list[Any]:
+        if self._events is None:
+            self._events = self.pages(self.core_factory(api).list_namespaced_event)
+        return self._events
 
 
 def quick_checks(
@@ -114,4 +167,17 @@ def quick_checks(
 
         return QuickCheck(name=name, run=run)
 
-    return [check("crashloop", crashloop), check("oom", oom), check("image-pull", image_pull)]
+    def run_pending() -> list[Finding]:
+        def read(api: Any) -> list[Finding]:
+            pods = [pod for pod in snapshot.pods(api) if pod.status.phase == "Pending"]
+            events = snapshot.events(api) if pods else []
+            return [item for pod in pods for item in pending(pod, events, timestamp)]
+
+        return reader.read(read)
+
+    return [
+        check("crashloop", crashloop),
+        check("oom", oom),
+        check("image-pull", image_pull),
+        QuickCheck(name="pending", run=run_pending),
+    ]

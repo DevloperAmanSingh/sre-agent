@@ -38,7 +38,9 @@ def test_pod_listing_includes_init_container_restarts():
     assert row.restarts == 4
 
 
-def test_describe_pod_includes_termination_and_specs_without_values():
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("previous", [False, True])
+def test_describe_pod_includes_termination_and_specs_without_values(current, previous):
     termination = k.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled", finished_at=NOW)
     obj = k.V1Pod(
         metadata=k.V1ObjectMeta(name="checkout", namespace="production"),
@@ -62,10 +64,12 @@ def test_describe_pod_includes_termination_and_specs_without_values():
                     image_id="id",
                     ready=False,
                     restart_count=2,
-                    state=k.V1ContainerState(
+                    state=k.V1ContainerState(terminated=termination)
+                    if current
+                    else k.V1ContainerState(
                         waiting=k.V1ContainerStateWaiting(reason="CrashLoopBackOff")
                     ),
-                    last_state=k.V1ContainerState(terminated=termination),
+                    last_state=k.V1ContainerState(terminated=termination if previous else None),
                 )
             ],
         ),
@@ -74,14 +78,18 @@ def test_describe_pod_includes_termination_and_specs_without_values():
         connector(read_namespaced_pod=lambda **kwargs: obj), "k8s_describe_pod", name="checkout"
     )
     row = result.containers[0]
-    assert (
-        row.name,
-        row.image,
-        row.state,
-        row.last_termination.reason,
-        row.last_termination.exit_code,
-    ) == ("app", "app:1", "CrashLoopBackOff", "OOMKilled", 137)
-    assert row.last_termination.finished_at == NOW
+    assert (row.name, row.image, row.state) == (
+        "app",
+        "app:1",
+        "OOMKilled" if current else "CrashLoopBackOff",
+    )
+    assert row.ready is False
+    assert row.restart_count == 2
+    for term, exists in [(row.current_termination, current), (row.last_termination, previous)]:
+        if exists:
+            assert (term.reason, term.exit_code, term.finished_at) == ("OOMKilled", 137, NOW)
+        else:
+            assert term is None
     assert row.limits == {"memory": "128Mi"}
     assert row.env_names == ["TOKEN"]
     assert row.probes["readiness"].kind == "exec"

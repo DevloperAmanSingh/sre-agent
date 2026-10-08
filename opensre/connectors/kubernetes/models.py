@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,8 +30,18 @@ class Probe(BaseModel):
     failure_threshold: int | None
 
 
-class Container(BaseModel):
+class ContainerObservation(BaseModel):
     name: str
+    state: str | None
+    state_kind: Literal["waiting", "running", "terminated", "unknown"]
+    ready: bool
+    restart_count: int
+    init: bool = False
+    current_termination: Termination | None
+    last_termination: Termination | None
+
+
+class Container(ContainerObservation):
     image: str | None
     env_names: list[str]
     secret_names: list[str]
@@ -38,8 +49,6 @@ class Container(BaseModel):
     limits: dict[str, str]
     probes: dict[str, Probe]
     cut: dict[str, int] = Field(default_factory=dict)
-    state: str | None = None
-    last_termination: Termination | None = None
 
 
 class Condition(BaseModel):

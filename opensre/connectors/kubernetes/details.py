@@ -1,7 +1,13 @@
 from datetime import datetime
 from typing import Any
 
-from opensre.connectors.kubernetes.models import Condition, Container, Probe, Termination
+from opensre.connectors.kubernetes.models import (
+    Condition,
+    Container,
+    ContainerObservation,
+    Probe,
+    Termination,
+)
 from opensre.connectors.kubernetes.redaction import redact
 
 
@@ -31,6 +37,37 @@ def termination(state: Any) -> Termination | None:
         return None
     return Termination(
         reason=redact(term.reason), exit_code=term.exit_code, finished_at=term.finished_at
+    )
+
+
+def container_observation(status: Any, name: str, *, init: bool = False) -> ContainerObservation:
+    state = getattr(status, "state", None)
+    waiting = getattr(state, "waiting", None)
+    current = termination(state)
+    kind = (
+        "waiting"
+        if waiting
+        else "terminated"
+        if current
+        else "running"
+        if getattr(state, "running", None)
+        else "unknown"
+    )
+    return ContainerObservation(
+        name=name,
+        init=init,
+        state_kind=kind,
+        state=redact(waiting.reason)
+        if waiting
+        else current.reason
+        if current
+        else "Running"
+        if kind == "running"
+        else None,
+        ready=bool(getattr(status, "ready", False)),
+        restart_count=getattr(status, "restart_count", 0) or 0,
+        current_termination=current,
+        last_termination=termination(getattr(status, "last_state", None)),
     )
 
 
@@ -64,11 +101,9 @@ def container_details(spec: Any, status: Any = None) -> Container:
     for source in as_list(spec.env_from):
         if source.secret_ref:
             secrets.append(source.secret_ref.name)
-    state = getattr(status, "state", None)
-    waiting = getattr(state, "waiting", None)
-    current = termination(state)
+    observation = container_observation(status, spec.name)
     return Container(
-        name=spec.name,
+        **observation.model_dump(),
         image=spec.image,
         env_names=[item.name for item in env[:50]],
         secret_names=secrets[:50],
@@ -76,10 +111,4 @@ def container_details(spec: Any, status: Any = None) -> Container:
         limits=(resources.limits or {}) if resources else {},
         probes=probes,
         cut={"env_names": max(0, len(env) - 50), "secret_names": max(0, len(secrets) - 50)},
-        state=redact(waiting.reason)
-        if waiting
-        else (
-            current.reason if current else ("Running" if getattr(state, "running", None) else None)
-        ),
-        last_termination=termination(getattr(status, "last_state", None)),
     )

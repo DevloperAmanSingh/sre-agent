@@ -9,6 +9,7 @@ from pydantic_settings import (
     InitSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
+    SettingsError,
 )
 
 
@@ -78,5 +79,7 @@ def load_settings(
             for error in exc.errors()
         )
         raise ConfigError(fields) from exc
+    except SettingsError as exc:
+        raise ConfigError(str(exc)) from exc
     except (OSError, yaml.YAMLError) as exc:
         raise ConfigError(f"{path}: cannot read config: {exc}") from exc

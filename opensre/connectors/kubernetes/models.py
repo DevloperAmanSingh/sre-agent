@@ -91,7 +91,8 @@ class ServiceSummary(BaseModel):
     ports: list[ServicePort]
     ports_cut: int
     selector: dict[str, str]
-    ready_endpoints: int
+    ready_endpoints: int | None
+    endpoints_complete: bool
 
 
 class Revision(BaseModel):

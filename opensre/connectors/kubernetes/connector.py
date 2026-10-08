@@ -10,6 +10,7 @@ from pydantic import Field, computed_field
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.checks import quick_checks
 from opensre.connectors.kubernetes.client import create_client
+from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.health import check_kube
 from opensre.connectors.kubernetes.reader import (
     KubeReader,
@@ -61,7 +62,7 @@ class KubernetesConnector:
 
             def read_namespaces(api_client: Any) -> NamespaceList:
                 page = self.core_factory(api_client).list_namespace(
-                    limit=limit, _request_timeout=self.settings.request_timeout_s
+                    limit=limit, _request_timeout=remaining_timeout()
                 )
                 result = bounded_page(page, limit, lambda item: str(item.metadata.name))
                 return NamespaceList(

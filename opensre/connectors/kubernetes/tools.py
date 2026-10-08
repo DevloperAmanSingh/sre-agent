@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
+from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
@@ -51,7 +52,7 @@ def read_tools(
             page = core_factory(api).list_namespaced_pod(
                 namespace=namespace or reader.settings.namespace,
                 limit=limit,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             return bounded_page(page, limit, lambda pod: pod_summary(pod, now()))
 
@@ -67,7 +68,7 @@ def read_tools(
             pod = core_factory(api).read_namespaced_pod(
                 name=name,
                 namespace=namespace or reader.settings.namespace,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             specs: list[Any] = as_list(pod.spec.init_containers) + as_list(pod.spec.containers)
             if container is not None:
@@ -108,7 +109,7 @@ def read_tools(
                 tail_lines=tail_lines,
                 previous=previous,
                 limit_bytes=16000,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             if container:
                 kwargs["container"] = container
@@ -138,7 +139,7 @@ def read_tools(
             page = core_factory(api).list_namespaced_event(
                 namespace=namespace or reader.settings.namespace,
                 limit=limit,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             page.items = sorted(
                 page.items,

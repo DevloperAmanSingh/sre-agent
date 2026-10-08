@@ -1,11 +1,11 @@
 from collections.abc import Callable
 from typing import Annotated, Any
 
-from kubernetes.client.exceptions import ApiException  # pyright: ignore[reportMissingTypeStubs]
 from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list
+from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.models import NodeSummary, ServicePort, ServiceSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 
@@ -20,22 +20,26 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
         def read(api: Any) -> Page[ServiceSummary]:
             core = core_factory(api)
             ns = namespace or reader.settings.namespace
-            timeout = reader.settings.request_timeout_s
-            page = core.list_namespaced_service(namespace=ns, limit=limit, _request_timeout=timeout)
+            page = core.list_namespaced_service(
+                namespace=ns, limit=limit, _request_timeout=remaining_timeout()
+            )
+            endpoints = core.list_namespaced_endpoints(
+                namespace=ns, limit=100, _request_timeout=remaining_timeout()
+            )
+            counts = {
+                endpoint.metadata.name: sum(
+                    len(as_list(subset.addresses)) for subset in as_list(endpoint.subsets)
+                )
+                for endpoint in endpoints.items[:100]
+            }
+            complete = not endpoints.metadata._continue and len(endpoints.items) <= 100
 
             def summarize(service: Any) -> ServiceSummary:
-                count = 0
-                if service.spec.type != "ExternalName":
-                    try:
-                        endpoints = core.read_namespaced_endpoints(
-                            name=service.metadata.name, namespace=ns, _request_timeout=timeout
-                        )
-                        count = sum(
-                            len(as_list(subset.addresses)) for subset in as_list(endpoints.subsets)
-                        )
-                    except ApiException as exc:
-                        if getattr(exc, "status", None) != 404:
-                            raise
+                external = service.spec.type == "ExternalName"
+                known = external or complete or service.metadata.name in counts
+                count = (
+                    0 if external else counts.get(service.metadata.name, 0 if complete else None)
+                )
                 ports = as_list(service.spec.ports)
                 return ServiceSummary(
                     name=service.metadata.name,
@@ -52,6 +56,7 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
                     ports_cut=max(0, len(ports) - 50),
                     selector=service.spec.selector or {},
                     ready_endpoints=count,
+                    endpoints_complete=known,
                 )
 
             return bounded_page(page, limit, summarize)
@@ -65,9 +70,7 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
         """Read node readiness, pressure conditions, capacity, allocatable and kubelet version."""
 
         def read(api: Any) -> Page[NodeSummary]:
-            page = core_factory(api).list_node(
-                limit=limit, _request_timeout=reader.settings.request_timeout_s
-            )
+            page = core_factory(api).list_node(limit=limit, _request_timeout=remaining_timeout())
 
             def summarize(node: Any) -> NodeSummary:
                 condition_map = {

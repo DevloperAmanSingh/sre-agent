@@ -6,7 +6,7 @@ from kubernetes import client  # pyright: ignore[reportMissingTypeStubs]
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.client import create_client
-from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
+from opensre.connectors.kubernetes.execution import KubeDiagnostics, remaining_timeout, run_bounded
 from opensre.domain import CheckResult
 
 
@@ -19,9 +19,7 @@ def check_kube(
     def read_version(diagnostics: KubeDiagnostics) -> str:
         with client_factory(settings) as api_client:
             diagnostics.check_credentials()
-            version = version_factory(api_client).get_code(
-                _request_timeout=settings.request_timeout_s
-            )
+            version = version_factory(api_client).get_code(_request_timeout=remaining_timeout())
         if not isinstance(version.git_version, str):
             raise ValueError("Version endpoint returned no server version")
         return version.git_version

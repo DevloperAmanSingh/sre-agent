@@ -10,6 +10,7 @@ from opensre.connectors.kubernetes.details import (
     conditions,
     container_details,
 )
+from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 from opensre.connectors.kubernetes.redaction import redact
@@ -42,7 +43,7 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             page = apps_factory(api).list_namespaced_deployment(
                 namespace=namespace or reader.settings.namespace,
                 limit=limit,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             return bounded_page(
                 page,
@@ -68,7 +69,7 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             deployment = apps_factory(api).read_namespaced_deployment(
                 name=name,
                 namespace=namespace or reader.settings.namespace,
-                _request_timeout=reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             specs = as_list(deployment.spec.template.spec.init_containers) + as_list(
                 deployment.spec.template.spec.containers
@@ -100,15 +101,14 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
         def read(api: Any) -> Page[Revision]:
             apps = apps_factory(api)
             ns = namespace or reader.settings.namespace
-            timeout = reader.settings.request_timeout_s
             deployment = apps.read_namespaced_deployment(
-                name=name, namespace=ns, _request_timeout=timeout
+                name=name, namespace=ns, _request_timeout=remaining_timeout()
             )
             page = apps.list_namespaced_replica_set(
                 namespace=ns,
                 limit=limit,
                 label_selector=label_selector(deployment.spec.selector),
-                _request_timeout=timeout,
+                _request_timeout=remaining_timeout(),
             )
 
             def revision(replica: Any) -> Revision:

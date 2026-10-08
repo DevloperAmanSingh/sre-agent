@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from opensre.connectors.kubernetes.details import event_time, pod_observation
+from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.models import ContainerObservation, PodObservation, Termination
 from opensre.connectors.kubernetes.reader import KubeReader
 from opensre.connectors.kubernetes.redaction import redact
@@ -233,7 +234,7 @@ class Snapshot:
             kwargs: dict[str, Any] = dict(
                 namespace=self.reader.settings.namespace,
                 limit=100,
-                _request_timeout=self.reader.settings.request_timeout_s,
+                _request_timeout=remaining_timeout(),
             )
             if token:
                 kwargs["_continue"] = token

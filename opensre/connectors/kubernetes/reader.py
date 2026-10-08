@@ -82,6 +82,7 @@ class KubeReader:
         def execute(diagnostics: KubeDiagnostics) -> T:
             with self.client_factory(self.settings) as api:
                 diagnostics.check_credentials()
+                diagnostics.remaining()
                 return operation(api)
 
         try:

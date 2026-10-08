@@ -7,7 +7,7 @@ from opensre.connectors.registry import collect_tools
 from opensre.domain import Diagnosis
 
 
-def test_agent_binds_only_read_tools_and_returns_diagnosis():
+def test_agent_binds_only_read_tools_and_returns_diagnosis(tmp_path):
     diagnosis = {
         "summary": "No target evidence",
         "cause": "Unknown",
@@ -29,9 +29,19 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis():
             )
         ]
     )
-    agent = build_agent(collect_tools([]), model=model, skills_root=SKILLS_ROOT)
+    from opensre.config import MemorySettings
+    from opensre.memory.facts import remember
+
+    remember(tmp_path, "payments runs in ns shop")
+    agent = build_agent(
+        collect_tools([]),
+        model=model,
+        skills_root=SKILLS_ROOT,
+        memory=MemorySettings(dir=tmp_path),
+    )
     result = agent.invoke({"messages": [{"role": "user", "content": "Investigate"}]})
     assert result["structured_response"] == Diagnosis(**diagnosis)
+    assert "payments runs in ns shop" in model.seen[0][0].text
     assert "triage" in model.seen[0][0].text
     assert "/triage/SKILL.md" in model.seen[0][0].text
     assert {"ls", "read_file", "glob", "grep"} <= set(model.bound_names)

@@ -16,10 +16,11 @@ from opensre.agents.backend import SkillsBackend
 from opensre.agents.lock import ToolGuardMiddleware
 from opensre.agents.middleware import OutputCapMiddleware
 from opensre.agents.model import HarnessModel
-from opensre.config import LLMSettings
+from opensre.config import LLMSettings, MemorySettings
 from opensre.connectors.registry import ToolSnapshot
 from opensre.domain import Diagnosis
 from opensre.llm import build_model
+from opensre.memory.facts import load_facts
 
 
 def resolve_skills_root() -> Path:
@@ -42,11 +43,14 @@ def build_agent(
     settings: LLMSettings | None = None,
     model: BaseChatModel | None = None,
     skills_root: Path = SKILLS_ROOT,
+    memory: MemorySettings | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     if not any(skills_root.rglob("SKILL.md")):
         raise ValueError(f"No SKILL.md playbooks found in {skills_root}")
     chat = model if model is not None else build_model(settings or LLMSettings())
-    backend = SkillsBackend(skills_root)
+    memory = memory or MemorySettings()
+    facts = load_facts(memory.dir) if memory.enabled else {}
+    backend = SkillsBackend(skills_root, facts=facts)
     middleware: list[AgentMiddleware[Any, Any]] = [
         FilesystemMiddleware(backend=backend, tools=["ls", "read_file", "glob", "grep"]),
         OutputCapMiddleware(),
@@ -60,6 +64,7 @@ def build_agent(
         system_prompt=(Path(__file__).parent / "prompts/system.md").read_text(),
         backend=backend,
         skills=["/"],
+        memory=list(facts),
         middleware=middleware,
         permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
         response_format=ToolStrategy(Diagnosis),

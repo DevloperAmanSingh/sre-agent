@@ -12,8 +12,9 @@ from deepagents.backends.protocol import (
 
 
 class SkillsBackend(BackendProtocol):
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, facts: dict[str, str] | None = None) -> None:
         self.reader = FilesystemBackend(root_dir=root, virtual_mode=True)
+        self.facts = dict(facts or {})
 
     def ls(self, path: str) -> LsResult:
         return self.reader.ls(path)
@@ -35,4 +36,9 @@ class SkillsBackend(BackendProtocol):
         return self.reader.glob(pattern, path)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return self.reader.download_files(paths)
+        return [
+            FileDownloadResponse(path=path, content=self.facts[path].encode("utf-8"))
+            if path in self.facts
+            else self.reader.download_files([path])[0]
+            for path in paths
+        ]

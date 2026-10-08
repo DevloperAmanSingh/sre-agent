@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from opensre.cli.memory import remember
 from opensre.config import ConfigError, Settings, load_settings
 from opensre.connectors.registry import build_connectors, collect_tools
 from opensre.doctor import diagnose_setup
@@ -13,6 +14,7 @@ from opensre.output import cap_text
 from opensre.scan import run_checks
 
 app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
+app.command()(remember)
 
 
 @app.callback(invoke_without_command=True)

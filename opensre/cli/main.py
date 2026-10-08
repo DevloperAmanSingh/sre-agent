@@ -9,6 +9,7 @@ from rich.table import Table
 from opensre.config import ConfigError, Settings, load_settings
 from opensre.connectors.registry import build_connectors
 from opensre.doctor import diagnose_setup
+from opensre.output import cap_text
 
 app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
 
@@ -81,4 +82,32 @@ def tools(ctx: typer.Context) -> None:
     table = Table("Tool", "Source")
     for name, source in sorted(sources.items()):
         table.add_row(name, source)
+    Console().print(table)
+
+
+@app.command()
+def ask(
+    ctx: typer.Context,
+    question: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Print a JSON diagnosis.")] = False,
+) -> None:
+    """Investigate a question using read-only tools and markdown skills."""
+    from opensre.agents.run import investigate
+
+    settings = cast(Settings, ctx.obj)
+    try:
+        diagnosis = investigate(question, build_connectors(settings), settings.llm)
+    except Exception as exc:
+        typer.echo(f"Investigation failed: {cap_text(str(exc), 2000)}", err=True)
+        raise typer.Exit(1) from exc
+    if json_output:
+        typer.echo(diagnosis.model_dump_json())
+        return
+    table = Table("Diagnosis", "Detail")
+    table.add_row("Summary", diagnosis.summary)
+    table.add_row("Cause", diagnosis.cause)
+    for evidence in diagnosis.evidence:
+        table.add_row(f"Evidence ({evidence.source})", evidence.detail)
+    table.add_row("Suggested fix", diagnosis.suggested_fix)
+    table.add_row("Confidence", f"{diagnosis.confidence:.0%}")
     Console().print(table)

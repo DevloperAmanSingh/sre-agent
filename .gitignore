@@ -1,0 +1,27 @@
+# private, never committed
+docs/
+AGENTS.md
+CLAUDE.md
+.claude/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.pyright/
+dist/
+build/
+*.egg-info/
+
+# local config and secrets
+.env
+.env.*
+opensre.local.yaml
+kubeconfig*
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/

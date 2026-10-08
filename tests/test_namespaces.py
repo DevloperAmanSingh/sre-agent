@@ -70,5 +70,5 @@ def test_namespace_errors_are_explicit():
         raise RuntimeError("cluster unavailable")
 
     tool = KubernetesConnector(KubeSettings(), client_factory=unavailable).tools()[0]
-    with pytest.raises(ToolException, match="cluster unavailable"):
+    with pytest.raises(ToolException, match="Kubernetes API or credentials unavailable"):
         tool.invoke({})

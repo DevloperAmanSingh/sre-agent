@@ -26,6 +26,8 @@ def deadline(monkeypatch):
         workers.append(worker)
         return worker
 
+    pause.release = release.set
+    pause.finish = lambda: [Thread.join(worker) for worker in workers]
     monkeypatch.setattr(execution, "Thread", start_worker)
     try:
         yield pause

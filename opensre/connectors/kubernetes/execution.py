@@ -1,18 +1,28 @@
 import logging
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from threading import Thread, get_ident
+from contextvars import ContextVar
+from threading import Event, Thread, get_ident
+from time import monotonic
 
 from opensre.output import cap_text
 
 
 class KubeDiagnostics(logging.Handler):
-    def __init__(self) -> None:
+    def __init__(self, timeout_s: float) -> None:
         super().__init__()
+        self.expires = monotonic() + timeout_s
+        self.cancelled = Event()
         self.thread_id: int | None = None
         self.text = ""
         self.cut = 0
         self.has_error = False
+
+    def remaining(self) -> float:
+        remaining = self.expires - monotonic()
+        if self.cancelled.is_set() or remaining <= 0:
+            raise TimeoutError("Kubernetes operation deadline expired")
+        return remaining
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.thread != self.thread_id:
@@ -63,12 +73,20 @@ class KubeDiagnostics(logging.Handler):
             self.close()
 
 
+_current: ContextVar[KubeDiagnostics] = ContextVar("kubernetes_deadline")
+
+
+def remaining_timeout() -> float:
+    return _current.get().remaining()
+
+
 def run_bounded[T](operation: Callable[[KubeDiagnostics], T], timeout_s: float) -> T:
     results: list[T] = []
     errors: list[Exception] = []
-    diagnostics = KubeDiagnostics()
+    diagnostics = KubeDiagnostics(timeout_s)
 
     def run() -> None:
+        token = _current.set(diagnostics)
         with diagnostics.capture():
             try:
                 result = operation(diagnostics)
@@ -77,11 +95,14 @@ def run_bounded[T](operation: Callable[[KubeDiagnostics], T], timeout_s: float) 
                 results.append(result)
             except Exception as exc:
                 errors.append(exc)
+            finally:
+                _current.reset(token)
 
     worker = Thread(target=run, daemon=True)
     worker.start()
     worker.join(timeout_s)
     if worker.is_alive():
+        diagnostics.cancelled.set()
         raise TimeoutError(
             cap_text(f"timed out after {timeout_s:g}s\n{diagnostics.summary()}".strip(), 2000)
         )

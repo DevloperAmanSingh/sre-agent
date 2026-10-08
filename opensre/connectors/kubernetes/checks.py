@@ -2,7 +2,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from opensre.connectors.kubernetes.details import as_list
+from opensre.connectors.kubernetes.details import as_list, termination
+from opensre.connectors.kubernetes.models import Termination
 from opensre.connectors.kubernetes.reader import KubeReader
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
 
@@ -33,6 +34,27 @@ def crashloop(pod: Any, now: datetime) -> list[Finding]:
         finding(pod, "CrashLoopBackOff", f"Container {status.name} is waiting in CrashLoopBackOff")
         for status in statuses(pod)
         if getattr(getattr(status.state, "waiting", None), "reason", None) == "CrashLoopBackOff"
+    ]
+
+
+def recent(timestamp: datetime | None, now: datetime) -> bool:
+    return timestamp is not None and 0 <= (now - timestamp).total_seconds() <= 3600
+
+
+def terminations(status: Any) -> list[Termination]:
+    return [term for state in (status.state, status.last_state) if (term := termination(state))]
+
+
+def oom(pod: Any, now: datetime) -> list[Finding]:
+    return [
+        finding(
+            pod,
+            "OOMKilled",
+            f"Container {status.name}: OOMKilled exit={term.exit_code} at {term.finished_at}",
+        )
+        for status in statuses(pod)
+        for term in terminations(status)
+        if term.reason == "OOMKilled" and recent(term.finished_at, now)
     ]
 
 
@@ -74,9 +96,12 @@ def quick_checks(
     snapshot = Snapshot(reader, core_factory)
     timestamp = now()
 
-    def run() -> list[Finding]:
-        return reader.read(
-            lambda api: [item for pod in snapshot.pods(api) for item in crashloop(pod, timestamp)]
-        )
+    def check(name: str, rule: Callable[[Any, datetime], list[Finding]]) -> QuickCheck:
+        def run() -> list[Finding]:
+            return reader.read(
+                lambda api: [item for pod in snapshot.pods(api) for item in rule(pod, timestamp)]
+            )
 
-    return [QuickCheck(name="crashloop", run=run)]
+        return QuickCheck(name=name, run=run)
+
+    return [check("crashloop", crashloop), check("oom", oom)]

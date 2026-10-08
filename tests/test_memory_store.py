@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -52,6 +52,34 @@ def test_feedback_transitions_and_unknown_id(store, diagnosis):
         store.set_feedback(999, "right")
     with pytest.raises(ValueError, match="right or wrong"):
         store.set_feedback(incident_id, "unconfirmed")
+
+
+def test_recall_filters_ranking_age_and_limit(store, diagnosis):
+    from opensre.memory.store import Signature
+
+    exact = [Signature(connector="kubernetes", reason="OOMKilled", resource="pod/shop/pay")]
+    other_resource = [exact[0].model_copy(update={"resource": "pod/shop/other"})]
+    ids = []
+    for day, signature in enumerate([exact, other_resource, exact, other_resource, exact]):
+        store.now = lambda day=day: NOW + timedelta(days=day)
+        incident_id = save(store, diagnosis, signature=signature)
+        store.set_feedback(incident_id, "wrong" if day == 2 else "right")
+        ids.append(incident_id)
+    save(store, diagnosis)
+    other = save(store, diagnosis, target='["kubernetes/other"]')
+    store.set_feedback(other, "right")
+    unrelated = save(
+        store, diagnosis, signature=[exact[0].model_copy(update={"connector": "host"})]
+    )
+    store.set_feedback(unrelated, "right")
+    store.now = lambda: NOW + timedelta(days=12)
+    recalled = store.similar('["kubernetes/prod"]', exact, limit=100)
+    assert [item.incident.id for item in recalled] == [ids[4], ids[2], ids[0]]
+    assert recalled[1].label == "previously ruled out"
+    assert recalled[2].label == "similar past incidents"
+    assert recalled[2].age == "12 days ago"
+    assert len(store.similar('["kubernetes/prod"]', exact, limit=1)) == 1
+    assert store.similar('["kubernetes/prod"]', []) == []
 
 
 def test_round_trip_schema_and_redaction(store, diagnosis, tmp_path):

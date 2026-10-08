@@ -34,6 +34,12 @@ class Incident(Diagnosis):
     feedback_at: datetime | None = None
 
 
+class RecalledIncident(BaseModel):
+    incident: Incident
+    label: Literal["similar past incidents", "previously ruled out"]
+    age: str
+
+
 def decode(row: sqlite3.Row) -> Incident:
     data = dict(row)
     for key in ("signature", "evidence"):
@@ -123,6 +129,45 @@ class IncidentStore:
             if row is None:
                 raise ValueError(f"Unknown incident #{incident_id}")
             return decode(row)
+
+    def similar(
+        self, target: str, signature: Sequence[Signature], limit: int = 3
+    ) -> list[RecalledIncident]:
+        if not signature or limit <= 0:
+            return []
+        pairs = {(clean(item.connector), clean(item.reason)) for item in signature}
+        exact = {
+            (clean(item.connector), clean(item.reason), clean(item.resource)) for item in signature
+        }
+        matches: list[tuple[bool, Incident]] = []
+        with self.connect() as db:
+            for row in db.execute(
+                "SELECT * FROM incidents WHERE target = ? AND status IN ('right', 'wrong')",
+                (target,),
+            ):
+                incident = decode(row)
+                if not any((item.connector, item.reason) in pairs for item in incident.signature):
+                    continue
+                same = any(
+                    (item.connector, item.reason, item.resource) in exact
+                    for item in incident.signature
+                )
+                matches.append((same, incident))
+                matches.sort(
+                    key=lambda item: (item[0], item[1].created_at, item[1].id), reverse=True
+                )
+                del matches[min(limit, 3) :]
+        now = self.now()
+        return [
+            RecalledIncident(
+                incident=incident,
+                label="similar past incidents"
+                if incident.status == "right"
+                else "previously ruled out",
+                age=f"{max(0, (now - incident.created_at).days)} days ago",
+            )
+            for _, incident in matches
+        ]
 
     def list_recent(self, limit: int = 20) -> list[Incident]:
         if not 1 <= limit <= 1000:

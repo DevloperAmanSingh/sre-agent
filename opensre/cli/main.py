@@ -96,6 +96,8 @@ def scan(
             )
         if report.findings:
             Console().print(table)
+        if report.omitted:
+            typer.echo(f"{report.omitted} more omitted.")
         for error in report.errors:
             typer.echo(f"Scan failed ({error.name}): {error.detail}", err=True)
         if report.ok:

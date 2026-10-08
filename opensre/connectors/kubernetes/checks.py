@@ -2,11 +2,16 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from opensre.connectors.kubernetes.details import event_time, pod_observation
-from opensre.connectors.kubernetes.execution import remaining_timeout
-from opensre.connectors.kubernetes.models import ContainerObservation, PodObservation, Termination
+from opensre.connectors.kubernetes.details import recent
+from opensre.connectors.kubernetes.models import (
+    ContainerObservation,
+    EventSummary,
+    PodObservation,
+    Termination,
+)
 from opensre.connectors.kubernetes.reader import KubeReader
 from opensre.connectors.kubernetes.redaction import redact
+from opensre.connectors.kubernetes.snapshot import Snapshot, acquire_snapshot
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
 from opensre.output import cap_text
 
@@ -26,10 +31,6 @@ def finding(
         severity=severity,
         evidence=[Evidence(source=source, detail=cap_text(redact(detail) or "", 2000))],
     )
-
-
-def recent(timestamp: datetime | None, now: datetime) -> bool:
-    return timestamp is not None and 0 <= (now - timestamp).total_seconds() <= 3600
 
 
 def terminations(container: ContainerObservation) -> list[Termination]:
@@ -164,34 +165,20 @@ def not_ready(pod: PodObservation, now: datetime) -> list[Finding]:
     )
 
 
-def pod_events(pod: PodObservation, events: list[Any], now: datetime) -> list[Any]:
-    return [
-        event
-        for event in events
-        if event.involved_object.kind == "Pod"
-        and event.involved_object.name == pod.name
-        and event.metadata.namespace == pod.namespace
-        and (not event.involved_object.uid or event.involved_object.uid == pod.uid)
-        and recent(event_time(event), now)
-    ]
-
-
-def pending(pod: PodObservation, events: list[Any], now: datetime) -> list[Finding]:
+def pending(pod: PodObservation, events: list[EventSummary], now: datetime) -> list[Finding]:
     condition = next(
         (condition for condition in pod.conditions if condition.type == "PodScheduled"), None
     )
     if pod.phase != "Pending" or (condition and condition.status == "True"):
         return []
-    scheduling = [
-        event for event in pod_events(pod, events, now) if event.reason == "FailedScheduling"
-    ]
+    scheduling = [event for event in events if event.reason == "FailedScheduling"]
     if scheduling:
-        event = max(scheduling, key=lambda item: event_time(item) or now)
+        event = max(scheduling, key=lambda item: item.last_seen or now)
         return [
             finding(
                 pod,
-                event.reason,
-                event.message or event.reason,
+                event.reason or "FailedScheduling",
+                event.message or event.reason or "FailedScheduling",
                 Severity.WARNING,
                 "k8s_list_events",
             )
@@ -209,94 +196,49 @@ def pending(pod: PodObservation, events: list[Any], now: datetime) -> list[Findi
     ]
 
 
-def probes(pod: PodObservation, events: list[Any], now: datetime) -> list[Finding]:
+def probes(pod: PodObservation, events: list[EventSummary], now: datetime) -> list[Finding]:
     return [
-        finding(pod, "ProbeFailure", event.message, Severity.WARNING, "k8s_list_events")
-        for event in pod_events(pod, events, now)
+        finding(
+            pod,
+            "ProbeFailure",
+            event.message or "Probe failure",
+            Severity.WARNING,
+            "k8s_list_events",
+        )
+        for event in events
         if event.reason == "Unhealthy"
         and event.type == "Warning"
         and "probe failed" in (event.message or "").casefold()
     ]
 
 
-class Snapshot:
-    def __init__(self, reader: KubeReader, core_factory: Callable[[Any], Any]) -> None:
-        self.reader = reader
-        self.core_factory = core_factory
-        self._pods: list[PodObservation] | None = None
-        self._events: list[Any] | None = None
-
-    def pages(self, method: Callable[..., Any]) -> list[Any]:
-        items: list[Any] = []
-        token = ""
-        seen: set[str] = set()
-        while True:
-            kwargs: dict[str, Any] = dict(
-                namespace=self.reader.settings.namespace,
-                limit=100,
-                _request_timeout=remaining_timeout(),
-            )
-            if token:
-                kwargs["_continue"] = token
-            page = method(**kwargs)
-            items.extend(page.items)
-            token = page.metadata._continue or ""
-            if not token:
-                return items
-            if token in seen:
-                raise ValueError("Kubernetes pagination repeated a continuation token")
-            seen.add(token)
-
-    def pods(self, api: Any) -> list[PodObservation]:
-        if self._pods is None:
-            self._pods = [
-                pod_observation(pod)
-                for pod in self.pages(self.core_factory(api).list_namespaced_pod)
-            ]
-        return self._pods
-
-    def events(self, api: Any) -> list[Any]:
-        if self._events is None:
-            self._events = self.pages(self.core_factory(api).list_namespaced_event)
-        return self._events
-
-
 def quick_checks(
     reader: KubeReader, core_factory: Callable[[Any], Any], now: Callable[[], datetime]
 ) -> list[QuickCheck]:
-    snapshot = Snapshot(reader, core_factory)
+    snapshot: Snapshot | None = None
     timestamp = now()
 
-    def check(name: str, rule: Callable[[PodObservation, datetime], list[Finding]]) -> QuickCheck:
+    def check(
+        name: str, rule: Callable[[PodObservation, list[EventSummary]], list[Finding]]
+    ) -> QuickCheck:
         def run() -> list[Finding]:
-            return reader.read(
-                lambda api: [item for pod in snapshot.pods(api) for item in rule(pod, timestamp)]
-            )
+            nonlocal snapshot
+            if snapshot is None:
+                snapshot = acquire_snapshot(reader, core_factory, timestamp)
+            return [
+                item
+                for pod in snapshot.pods
+                for item in rule(pod, snapshot.events.get((pod.namespace, pod.name), []))
+            ]
 
         return QuickCheck(name=name, run=run)
 
-    def run_pending() -> list[Finding]:
-        def read(api: Any) -> list[Finding]:
-            pods = [pod for pod in snapshot.pods(api) if pod.phase == "Pending"]
-            events = snapshot.events(api) if pods else []
-            return [item for pod in pods for item in pending(pod, events, timestamp)]
-
-        return reader.read(read)
-
-    def run_probes() -> list[Finding]:
-        def read(api: Any) -> list[Finding]:
-            pods = snapshot.pods(api)
-            events = snapshot.events(api) if pods else []
-            return [item for pod in pods for item in probes(pod, events, timestamp)]
-
-        return reader.read(read)
-
     return [
-        check("crashloop", crashloop),
-        check("oom", oom),
-        check("image-pull", image_pull),
-        check("not-ready", not_ready),
-        check("restarts", restarts),
-        QuickCheck(name="pending", run=run_pending),
-        QuickCheck(name="probes", run=run_probes),
+        check("crashloop", lambda pod, events: crashloop(pod, timestamp)),
+        check("oom", lambda pod, events: oom(pod, timestamp)),
+        check("image-pull", lambda pod, events: image_pull(pod, timestamp)),
+        check("not-ready", lambda pod, events: not_ready(pod, timestamp)),
+        check("restarts", lambda pod, events: restarts(pod, timestamp)),
+        check("pending", lambda pod, events: pending(pod, events, timestamp)),
+        check("probes", lambda pod, events: probes(pod, events, timestamp)),
     ]

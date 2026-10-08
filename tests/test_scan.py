@@ -20,14 +20,25 @@ def result(severity):
 
 @pytest.mark.parametrize("json_output", [False, True])
 @pytest.mark.parametrize(
-    "findings,exit_code", [([], 0), ([result("info"), result("warning"), result("critical")], 1)]
+    "findings,exit_code",
+    [
+        ([], 0),
+        ([result("info"), result("warning"), result("critical")], 1),
+        ([result("warning")] * 50 + [result("critical")], 1),
+    ],
 )
 def test_scan_runs_enabled_connector_checks_and_sorts(
     findings, exit_code, json_output, monkeypatch
 ):
     from opensre.cli import main
 
-    target = NS(name="fake", checks=lambda: [QuickCheck(name="fault", run=lambda: findings)])
+    target = NS(
+        name="fake",
+        checks=lambda: [
+            QuickCheck(name=f"fault-{index}", run=lambda item=item: [item])
+            for index, item in enumerate(findings)
+        ],
+    )
     empty = NS(name="empty", checks=lambda: [])
     monkeypatch.setattr(main, "build_connectors", lambda settings: [empty, target])
     response = CliRunner().invoke(app, ["scan", *(["--json"] if json_output else [])])
@@ -35,15 +46,17 @@ def test_scan_runs_enabled_connector_checks_and_sorts(
     if json_output:
         report = json.loads(response.stdout)
         assert report["errors"] == []
-        assert [item["severity"] for item in report["findings"]] == (
-            ["critical", "warning", "info"] if findings else []
-        )
+        expected = sorted(
+            [item.severity.value for item in findings], key=["critical", "warning", "info"].index
+        )[:50]
+        assert [item["severity"] for item in report["findings"]] == expected
+        assert report["omitted"] == max(0, len(findings) - 50)
     elif findings:
-        assert (
-            response.stdout.index("critical")
-            < response.stdout.index("warning")
-            < response.stdout.index("info")
-        )
+        assert response.stdout.index("critical") < response.stdout.index("warning")
+        if len(findings) <= 50:
+            assert response.stdout.index("warning") < response.stdout.index("info")
+        else:
+            assert "1 more omitted" in response.stdout
     else:
         assert "No findings" in response.stdout
 

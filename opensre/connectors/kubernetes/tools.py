@@ -5,7 +5,13 @@ from typing import Annotated, Any
 from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
-from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
+from opensre.connectors.kubernetes.details import (
+    as_list,
+    conditions,
+    container_details,
+    event_summary,
+    event_time,
+)
 from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
@@ -151,14 +157,7 @@ def read_tools(
             return bounded_page(
                 page,
                 limit,
-                lambda event: EventSummary(
-                    type=event.type,
-                    reason=redact(event.reason),
-                    message=cap_text(redact(event.message) or "", 2000),
-                    object=f"{event.involved_object.kind}/{event.involved_object.name}",
-                    count=event.count or 1,
-                    last_seen=event_time(event),
-                ),
+                event_summary,
             )
 
         return reader.read_result(read)

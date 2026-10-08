@@ -3,7 +3,7 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
-from fakes.kubernetes import container_status, pod
+from fakes.kubernetes import NOW, container_status, pod
 from fakes.kubernetes import page as kube_page
 from fakes.model import ScriptedModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -44,6 +44,7 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
     connector = KubernetesConnector(
         KubeSettings(),
         client_factory=lambda settings: nullcontext(object()),
+        now=lambda: NOW,
         core_factory=lambda client: SimpleNamespace(
             list_namespace=lambda **kwargs: page,
             list_namespaced_pod=lambda **kwargs: kube_page(
@@ -137,7 +138,9 @@ def test_ask_returns_after_credential_deadline(deadline, monkeypatch):
         deadline()
         raise RuntimeError("Released credential operation")
 
-    connector = KubernetesConnector(KubeSettings(request_timeout_s=3), client_factory=credentials)
+    connector = KubernetesConnector(
+        KubeSettings(request_timeout_s=3), client_factory=credentials, now=lambda: NOW
+    )
     diagnosis = {
         "summary": "Access timed out",
         "cause": "Unable to gather evidence",

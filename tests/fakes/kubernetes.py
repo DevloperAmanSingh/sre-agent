@@ -16,7 +16,7 @@ def page(items, remaining=0):
 
 
 def connector(**methods):
-    api = NS(**methods)
+    api = NS(**({"list_namespaced_event": lambda **kwargs: page([])} | methods))
     return KubernetesConnector(
         KubeSettings(namespace="production", request_timeout_s=3),
         client_factory=lambda settings: nullcontext(object()),

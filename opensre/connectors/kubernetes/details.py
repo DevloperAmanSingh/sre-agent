@@ -5,12 +5,17 @@ from opensre.connectors.kubernetes.models import (
     Condition,
     Container,
     ContainerObservation,
+    EventSummary,
     PodObservation,
     Probe,
     Termination,
 )
 from opensre.connectors.kubernetes.redaction import redact
 from opensre.output import cap_text
+
+
+def recent(timestamp: datetime | None, now: datetime) -> bool:
+    return timestamp is not None and 0 <= (now - timestamp).total_seconds() <= 3600
 
 
 def bounded_names(values: list[str]) -> tuple[list[str], int]:
@@ -31,6 +36,17 @@ def event_time(event: Any) -> datetime | None:
         or event.last_timestamp
         or event.event_time
         or event.first_timestamp
+    )
+
+
+def event_summary(event: Any) -> EventSummary:
+    return EventSummary(
+        type=event.type,
+        reason=redact(event.reason),
+        message=cap_text(redact(event.message) or "", 2000),
+        object=f"{event.involved_object.kind}/{event.involved_object.name}",
+        count=event.count or 1,
+        last_seen=event_time(event),
     )
 
 

@@ -53,8 +53,11 @@ class KubernetesConnector:
                 names = [str(item.metadata.name) for item in page.items[:limit]]
                 more = bool(page.metadata._continue)
                 remaining = page.metadata.remaining_item_count
-                cut = None if more and remaining is None else (remaining or 0)
-                result = NamespaceList(namespaces=names, cut=cut, more_available=more)
+                dropped = max(0, len(page.items) - limit)
+                cut = None if more and remaining is None else (remaining or 0) + dropped
+                result = NamespaceList(
+                    namespaces=names, cut=cut, more_available=more or dropped > 0
+                )
                 return result.model_dump_json(), result
             except Exception as exc:
                 raise ToolException(f"Namespace read failed: {exc}") from exc

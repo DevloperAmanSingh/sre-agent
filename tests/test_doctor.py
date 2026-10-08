@@ -9,7 +9,8 @@ from typer.testing import CliRunner
 
 from opensre.cli.main import app
 from opensre.config import KubeSettings, LLMSettings
-from opensre.doctor import check_kube, check_llm
+from opensre.connectors.kubernetes.health import check_kube
+from opensre.doctor import check_llm
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -88,7 +89,9 @@ def test_doctor_exit_and_output(output, failure, monkeypatch):
         ok=failure != "kube",
         detail="unreachable" if failure == "kube" else "v1.35.0",
     )
-    monkeypatch.setattr(main, "check_kube", lambda settings: result)
+    monkeypatch.setattr(
+        main, "build_connectors", lambda settings: [SimpleNamespace(health=lambda: result)]
+    )
     flags = [f"--{failure}", "nonesuch/model"] if failure in ("primary", "fallback") else []
     response = CliRunner().invoke(
         app, [*flags, "doctor", *(["--json"] if output == "json" else [])]
@@ -141,10 +144,16 @@ def test_kube_diagnostics_are_owned(output, version_fails, monkeypatch, caplog, 
 
     monkeypatch.setattr(
         main,
-        "check_kube",
-        lambda settings: check_kube(
-            settings, client_factory=noisy_factory, version_factory=version_factory
-        ),
+        "build_connectors",
+        lambda settings: [
+            SimpleNamespace(
+                health=lambda: check_kube(
+                    settings.connectors.kubernetes,
+                    client_factory=noisy_factory,
+                    version_factory=version_factory,
+                )
+            )
+        ],
     )
     response = CliRunner().invoke(app, ["doctor", *(["--json"] if output == "json" else [])])
     assert response.exit_code == 1

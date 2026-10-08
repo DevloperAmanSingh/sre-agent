@@ -7,7 +7,8 @@ from rich.console import Console
 from rich.table import Table
 
 from opensre.config import ConfigError, Settings, load_settings
-from opensre.doctor import DoctorReport, check_kube, check_llm
+from opensre.connectors.registry import build_connectors
+from opensre.doctor import diagnose_setup
 
 app = typer.Typer(name="opensre", help="Read-only Kubernetes SRE assistant.")
 
@@ -50,9 +51,7 @@ def doctor(
     json_output: Annotated[bool, typer.Option("--json", help="Print a JSON report.")] = False,
 ) -> None:
     settings = cast(Settings, ctx.obj)
-    report = DoctorReport(
-        checks=[check_kube(settings.connectors.kubernetes), *check_llm(settings.llm, live=live)]
-    )
+    report = diagnose_setup(build_connectors(settings), settings.llm, live=live)
     if json_output:
         typer.echo(report.model_dump_json())
     else:

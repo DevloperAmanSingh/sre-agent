@@ -81,6 +81,30 @@ def test_describe_pod_includes_termination_and_specs_without_values():
     assert "secret-command" not in result.model_dump_json()
 
 
+def test_container_field_caps_report_omitted_env_and_secret_names():
+    spec = k.V1Container(
+        name="app",
+        image="app:1",
+        env=[k.V1EnvVar(name=f"ENV_{index}", value="hidden") for index in range(60)],
+        env_from=[
+            k.V1EnvFromSource(secret_ref=k.V1SecretEnvSource(name=f"secret-{index}"))
+            for index in range(55)
+        ],
+    )
+    obj = k.V1Pod(
+        metadata=k.V1ObjectMeta(name="checkout", namespace="production"),
+        spec=k.V1PodSpec(containers=[spec]),
+        status=k.V1PodStatus(),
+    )
+    result = invoke(
+        connector(read_namespaced_pod=lambda **kwargs: obj), "k8s_describe_pod", name="checkout"
+    )
+    row = result.containers[0]
+    assert len(row.env_names) == 50
+    assert row.cut == {"env_names": 10, "secret_names": 5}
+    assert "hidden" not in result.model_dump_json()
+
+
 @pytest.mark.parametrize("previous", [False, True])
 @pytest.mark.parametrize("character", ["x", '"'])
 def test_pod_logs_request_tail_and_previous_and_cap_text(previous, character):

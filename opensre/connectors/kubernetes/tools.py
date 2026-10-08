@@ -112,7 +112,7 @@ def read_tools(
                 server_cap_bytes=16000,
                 truncation="Tail only; API limit 16000 bytes; older omitted count unknown",
             )
-            while len(result.model_dump_json()) > 20000:
+            while len(result.model_dump_json()) > 19000:
                 shown //= 2
                 result.text = cap_text(text, shown)
                 result.cut = max(0, len(text) - shown)

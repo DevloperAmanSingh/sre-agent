@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from kubernetes.client.rest import ApiException
+from urllib3.exceptions import ReadTimeoutError
 
 from opensre.config import KubeSettings
 
@@ -35,6 +36,19 @@ def test_reader_maps_errors_without_leaking_api_body(status, code):
         reader.read(fail)
     assert error.value.error.code == code
     assert "unsafe-secret" not in str(error.value)
+
+
+def test_reader_classifies_transport_timeouts():
+    from opensre.connectors.kubernetes.reader import KubeReader, KubeReadError
+
+    reader = KubeReader(KubeSettings(), lambda settings: nullcontext(object()))
+
+    def fail(api):
+        raise ReadTimeoutError(None, "/api", "request timed out")
+
+    with pytest.raises(KubeReadError) as error:
+        reader.read(fail)
+    assert error.value.error.code == "timeout"
 
 
 def test_reader_deadline_includes_client_creation(deadline):

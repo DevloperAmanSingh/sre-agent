@@ -72,6 +72,7 @@ def container_details(spec: Any, status: Any = None) -> Container:
         requests=(resources.requests or {}) if resources else {},
         limits=(resources.limits or {}) if resources else {},
         probes=probes,
+        cut={"env_names": max(0, len(env) - 50), "secret_names": max(0, len(secrets) - 50)},
         state=waiting.reason
         if waiting
         else (

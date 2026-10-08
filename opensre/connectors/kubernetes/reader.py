@@ -5,6 +5,7 @@ from typing import Any, Literal, cast
 from kubernetes.client.exceptions import ApiException  # pyright: ignore[reportMissingTypeStubs]
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
+from urllib3.exceptions import TimeoutError as HTTPTimeoutError
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
@@ -48,7 +49,7 @@ def bounded_response[T: BoundedResult](result: T) -> tuple[str, T]:
     visit(result)
     page: Page[Any] | None = cast(Page[Any], result) if isinstance(result, Page) else None
     original_items = len(page.items) if page is not None else 0
-    while len(result.model_dump_json()) > 20000:
+    while len(result.model_dump_json()) > 19000:
         candidates = [collection for collection in collections if collection]
         if not candidates:
             raise ValueError("Kubernetes result cannot fit the output budget")
@@ -119,7 +120,7 @@ class KubeReader:
                 error = ReadError.model_validate(
                     {"code": code, "detail": f"Kubernetes read {code}"}
                 )
-            elif isinstance(cause, TimeoutError):
+            elif isinstance(cause, (TimeoutError, HTTPTimeoutError)):
                 error = ReadError(
                     code="timeout", detail=f"timed out after {self.settings.request_timeout_s:g}s"
                 )

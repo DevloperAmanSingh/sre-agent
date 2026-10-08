@@ -37,6 +37,7 @@ class Container(BaseModel):
     requests: dict[str, str]
     limits: dict[str, str]
     probes: dict[str, Probe]
+    cut: dict[str, int] = Field(default_factory=dict)
     state: str | None = None
     last_termination: Termination | None = None
 

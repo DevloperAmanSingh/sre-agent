@@ -64,6 +64,20 @@ def test_reader_deadline_includes_client_creation(deadline):
     assert "timed out after 3s" in str(error.value)
 
 
+def test_typed_result_rendering_is_inside_deadline_and_error_mapping(monkeypatch):
+    from opensre.connectors.kubernetes import reader as module
+    from opensre.connectors.kubernetes.reader import KubeReader, KubeReadError
+
+    def fail(result):
+        raise TimeoutError("output deadline")
+
+    monkeypatch.setattr(module, "bounded_response", fail)
+    reader = KubeReader(KubeSettings(), lambda settings: nullcontext(object()))
+    with pytest.raises(KubeReadError) as error:
+        reader.read_result(lambda api: None)
+    assert error.value.error.code == "timeout"
+
+
 def test_large_typed_results_are_bounded_in_content_and_artifact():
     from opensre.connectors.kubernetes.models import PodSummary
     from opensre.connectors.kubernetes.reader import Page, bounded_response

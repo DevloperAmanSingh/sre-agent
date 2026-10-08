@@ -101,6 +101,9 @@ class KubeReader:
         self.settings = settings
         self.client_factory = client_factory
 
+    def read_result[T: BoundedResult](self, operation: Callable[[Any], T]) -> tuple[str, T]:
+        return self.read(lambda api: bounded_response(operation(api)))
+
     def read[T](self, operation: Callable[[Any], T]) -> T:
         def execute(diagnostics: KubeDiagnostics) -> T:
             with self.client_factory(self.settings) as api:

@@ -15,7 +15,6 @@ from opensre.connectors.kubernetes.reader import (
     KubeReader,
     Page,
     bounded_page,
-    bounded_response,
 )
 from opensre.connectors.kubernetes.tools import read_tools
 from opensre.domain import CheckResult, QuickCheck
@@ -72,9 +71,7 @@ class KubernetesConnector:
                     truncation=result.truncation,
                 )
 
-            return bounded_response(
-                KubeReader(self.settings, self.client_factory).read(read_namespaces)
-            )
+            return KubeReader(self.settings, self.client_factory).read_result(read_namespaces)
 
         k8s_list_namespaces.metadata = {"read_only": True}
         return [

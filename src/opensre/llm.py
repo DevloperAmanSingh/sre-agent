@@ -28,6 +28,9 @@ def configured_models(settings: LLMSettings) -> list[str]:
 def validate_keys(model: str) -> None:
     result = cast(KeyValidation, litellm.validate_environment(model))  # pyright: ignore[reportUnknownMemberType]
     missing = result.get("missing_keys", [])
+    key = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}.get(model.split("/")[0])
+    if key and not os.environ.get(key, "").strip() and key not in missing:
+        missing.append(key)
     if not result.get("keys_in_environment") or missing:
         detail = ", ".join(missing) or "unsupported model or provider"
         raise LLMError(f"{model}: {detail}")

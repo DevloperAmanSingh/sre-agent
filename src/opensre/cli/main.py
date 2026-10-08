@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from opensre.config import ConfigError, Settings, load_settings
-from opensre.doctor import check_kube
+from opensre.doctor import DoctorReport, check_kube, check_llm
 
 app = typer.Typer(name="opensre", help="Read-only Kubernetes SRE assistant.")
 
@@ -43,10 +43,23 @@ def main(
 
 
 @app.command()
-def doctor(ctx: typer.Context) -> None:
+def doctor(
+    ctx: typer.Context,
+    live: Annotated[bool, typer.Option("--live", help="Send a tiny prompt to each model.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Print a JSON report.")] = False,
+) -> None:
     settings = cast(Settings, ctx.obj)
-    result = check_kube(settings.kube)
-    table = Table("Check", "Status", "Detail")
-    table.add_row(result.name, "PASS" if result.ok else "FAIL", result.detail)
-    Console().print(table)
-    raise typer.Exit(0 if result.ok else 1)
+    report = DoctorReport(checks=[check_kube(settings.kube), *check_llm(settings.llm, live=live)])
+    if json_output:
+        typer.echo(report.model_dump_json())
+    else:
+        table = Table("Check", "Status", "Detail", "Latency")
+        for result in report.checks:
+            table.add_row(
+                result.name,
+                "PASS" if result.ok else "FAIL",
+                result.detail,
+                f"{result.latency_s:.3f}s" if result.latency_s is not None else "—",
+            )
+        Console().print(table)
+    raise typer.Exit(0 if report.ok else 1)

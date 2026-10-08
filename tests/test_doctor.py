@@ -1,3 +1,4 @@
+import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -5,8 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from opensre.cli.main import app
-from opensre.config import KubeSettings
-from opensre.doctor import check_kube
+from opensre.config import KubeSettings, LLMSettings
+from opensre.doctor import check_kube, check_llm
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -29,13 +30,67 @@ def test_kube_result(failure):
     assert result.detail == ("cluster unreachable" if failure else "v1.35.0")
 
 
-@pytest.mark.parametrize("ok", [True, False])
-def test_doctor_kube_exit(ok, monkeypatch):
+@pytest.mark.parametrize("output", ["table", "json"])
+@pytest.mark.parametrize("failure", [None, "kube", "key"])
+def test_doctor_exit_and_output(output, failure, monkeypatch):
     from opensre import doctor
     from opensre.cli import main
 
-    result = doctor.CheckResult(name="kubernetes", ok=ok, detail="v1.35.0" if ok else "unreachable")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    if failure != "key":
+        monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+    result = doctor.CheckResult(
+        name="kubernetes",
+        ok=failure != "kube",
+        detail="unreachable" if failure == "kube" else "v1.35.0",
+    )
     monkeypatch.setattr(main, "check_kube", lambda settings: result)
-    response = CliRunner().invoke(app, ["doctor"])
-    assert response.exit_code == (0 if ok else 1)
-    assert result.detail in response.stdout
+    response = CliRunner().invoke(app, ["doctor", *(["--json"] if output == "json" else [])])
+    assert response.exit_code == (0 if failure is None else 1)
+    if output == "json":
+        data = json.loads(response.stdout)
+        assert data["ok"] is (failure is None)
+        assert len(data["checks"]) == 3
+        assert data["checks"][0] == result.model_dump()
+        assert all(set(check) == {"name", "ok", "detail", "latency_s"} for check in data["checks"])
+    else:
+        assert result.detail in response.stdout
+    if failure == "key":
+        assert "OPENAI_API_KEY" in response.stdout
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_live_results(failure, monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+    times = iter([1.0, 1.25, 2.0, 2.5])
+    requests = []
+
+    def completion(**kwargs):
+        requests.append(kwargs)
+        if failure and kwargs["model"].startswith("deepseek"):
+            raise RuntimeError("provider unavailable")
+        return object()
+
+    results = check_llm(
+        LLMSettings(timeout_s=4), live=True, completion=completion, clock=lambda: next(times)
+    )
+    assert [result.ok for result in results] == [not failure, True]
+    assert [result.latency_s for result in results] == [0.25, 0.5]
+    if failure:
+        assert results[0].detail == "provider unavailable"
+    assert [request["model"] for request in requests] == [
+        "deepseek/deepseek-chat",
+        "openai/gpt-5.6-luna",
+    ]
+    assert all(request["timeout"] == 4 and request["max_tokens"] == 8 for request in requests)
+
+
+def test_live_skips_missing_key():
+    def forbidden(**kwargs):
+        raise AssertionError("No request allowed without keys")
+
+    results = check_llm(LLMSettings(fallback=None), live=True, completion=forbidden)
+    assert not results[0].ok
+    assert "DEEPSEEK_API_KEY" in results[0].detail
+    assert results[0].latency_s is None

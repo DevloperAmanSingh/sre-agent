@@ -1,13 +1,14 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from kubernetes.client.exceptions import ApiException  # pyright: ignore[reportMissingTypeStubs]
 from langchain_core.tools import ToolException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
+from opensre.output import cap_text
 
 
 class ReadError(BaseModel):
@@ -21,7 +22,54 @@ class KubeReadError(ToolException):
         super().__init__(error.model_dump_json())
 
 
-class Page[T](BaseModel):
+class BoundedResult(BaseModel):
+    output_cut: int = Field(
+        default=0, description="Additional collection entries omitted for output size"
+    )
+
+
+def bounded_response[T: BoundedResult](result: T) -> tuple[str, T]:
+    collections: list[list[Any] | dict[Any, Any]] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, BaseModel):
+            for name in type(value).model_fields:
+                item = getattr(value, name)
+                if isinstance(item, str) and name != "text":
+                    setattr(value, name, cap_text(item, 2000))
+                else:
+                    visit(item)
+        elif isinstance(value, (list, dict)):
+            collection = cast(list[Any] | dict[Any, Any], value)
+            collections.append(collection)
+            for item in collection.values() if isinstance(collection, dict) else collection:
+                visit(item)
+
+    visit(result)
+    page: Page[Any] | None = cast(Page[Any], result) if isinstance(result, Page) else None
+    original_items = len(page.items) if page is not None else 0
+    while len(result.model_dump_json()) > 20000:
+        candidates = [collection for collection in collections if collection]
+        if not candidates:
+            raise ValueError("Kubernetes result cannot fit the output budget")
+        collection = max(candidates, key=lambda item: len(str(item)))
+        if isinstance(collection, dict):
+            collection.pop(next(reversed(collection)))
+        else:
+            collection.pop()
+        result.output_cut += 1
+    if page is not None and original_items != len(page.items):
+        removed = original_items - len(page.items)
+        if page.cut is not None:
+            page.cut += removed
+            page.truncation = f"showing {len(page.items)} of {len(page.items) + page.cut}"
+        else:
+            page.truncation = f"showing {len(page.items)}; more available"
+        page.more_available |= removed > 0
+    return result.model_dump_json(), cast(T, result)
+
+
+class Page[T](BoundedResult):
     items: list[T]
     cut: int | None
     more_available: bool

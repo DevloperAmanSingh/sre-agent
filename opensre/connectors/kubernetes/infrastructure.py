@@ -7,7 +7,7 @@ from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list
 from opensre.connectors.kubernetes.models import NodeSummary, ServicePort, ServiceSummary
-from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page, bounded_response
 
 
 def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[BaseTool]:
@@ -57,7 +57,7 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
             return bounded_page(page, limit, summarize)
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_list_nodes(
@@ -93,6 +93,6 @@ def infrastructure_tools(reader: KubeReader, core_factory: Callable[[Any], Any])
             return bounded_page(page, limit, summarize)
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     return [k8s_list_services, k8s_list_nodes]

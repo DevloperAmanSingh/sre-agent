@@ -6,7 +6,7 @@ from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details
 from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
-from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page, bounded_response
 
 
 def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> list[BaseTool]:
@@ -36,7 +36,7 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             )
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_describe_deployment(
@@ -66,7 +66,7 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             )
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_rollout_history(
@@ -114,6 +114,6 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             return result
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     return [k8s_list_deployments, k8s_describe_deployment, k8s_rollout_history]

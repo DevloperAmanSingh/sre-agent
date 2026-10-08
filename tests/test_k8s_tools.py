@@ -82,7 +82,8 @@ def test_describe_pod_includes_termination_and_specs_without_values():
 
 
 @pytest.mark.parametrize("previous", [False, True])
-def test_pod_logs_request_tail_and_previous_and_cap_text(previous):
+@pytest.mark.parametrize("character", ["x", '"'])
+def test_pod_logs_request_tail_and_previous_and_cap_text(previous, character):
     def logs(**kwargs):
         assert kwargs == {
             "name": "checkout",
@@ -93,7 +94,7 @@ def test_pod_logs_request_tail_and_previous_and_cap_text(previous):
             "limit_bytes": 16000,
             "_request_timeout": 3,
         }
-        return "x" * 17000
+        return character * 17000
 
     result = invoke(
         connector(read_namespaced_pod_log=logs),
@@ -103,9 +104,11 @@ def test_pod_logs_request_tail_and_previous_and_cap_text(previous):
         tail_lines=10,
         previous=previous,
     )
-    assert result.cut == 1000
-    assert result.text.endswith("[1000 characters cut]")
-    assert len(result.text) < 16100
+    assert result.cut >= 1000
+    if character == "x":
+        assert result.cut == 1000
+    assert result.text.endswith(f"[{result.cut} characters cut]")
+    assert len(result.model_dump_json()) <= 20000
 
 
 def test_events_show_warnings_first_with_timestamps_and_counts():

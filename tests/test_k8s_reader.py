@@ -48,3 +48,33 @@ def test_reader_deadline_includes_client_creation(deadline):
         KubeReader(KubeSettings(request_timeout_s=3), credentials).read(lambda api: None)
     assert error.value.error.code == "timeout"
     assert "timed out after 3s" in str(error.value)
+
+
+def test_large_typed_results_are_bounded_in_content_and_artifact():
+    from opensre.connectors.kubernetes.models import PodSummary
+    from opensre.connectors.kubernetes.reader import Page, bounded_response
+
+    result = Page[PodSummary](
+        items=[
+            PodSummary(
+                name="x" * 4000,
+                namespace="default",
+                phase="Running",
+                ready="1/1",
+                restarts=0,
+                age_s=0,
+                node="worker",
+            )
+            for _ in range(100)
+        ],
+        cut=200,
+        more_available=True,
+        truncation="showing 100 of 300",
+    )
+    content, artifact = bounded_response(result)
+    assert len(content) <= 20000
+    assert content == artifact.model_dump_json()
+    assert artifact.cut == 300 - len(artifact.items)
+    assert artifact.output_cut > 0
+    assert artifact.truncation == f"showing {len(artifact.items)} of 300"
+    assert "characters cut" in artifact.items[0].name

@@ -4,23 +4,28 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from kubernetes import client  # pyright: ignore[reportMissingTypeStubs]
-from langchain_core.tools import BaseTool, ToolException, tool
-from pydantic import BaseModel, Field
+from langchain_core.tools import BaseTool, tool
+from pydantic import Field, computed_field
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.checks import quick_checks
 from opensre.connectors.kubernetes.client import create_client
-from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
 from opensre.connectors.kubernetes.health import check_kube
-from opensre.connectors.kubernetes.reader import KubeReader
+from opensre.connectors.kubernetes.reader import (
+    KubeReader,
+    Page,
+    bounded_page,
+    bounded_response,
+)
 from opensre.connectors.kubernetes.tools import read_tools
 from opensre.domain import CheckResult, QuickCheck
 
 
-class NamespaceList(BaseModel):
-    namespaces: list[str]
-    cut: int | None
-    more_available: bool
+class NamespaceList(Page[str]):
+    @computed_field
+    @property
+    def namespaces(self) -> list[str]:
+        return self.items
 
 
 class KubernetesConnector:
@@ -55,24 +60,21 @@ class KubernetesConnector:
         ) -> tuple[str, NamespaceList]:
             """Read namespace names; cut is null when the remaining count is unknown."""
 
-            def read_namespaces(diagnostics: KubeDiagnostics) -> NamespaceList:
-                with self.client_factory(self.settings) as api_client:
-                    diagnostics.check_credentials()
-                    page = self.core_factory(api_client).list_namespace(
-                        limit=limit, _request_timeout=self.settings.request_timeout_s
-                    )
-                names = [str(item.metadata.name) for item in page.items[:limit]]
-                more = bool(page.metadata._continue)
-                remaining = page.metadata.remaining_item_count
-                dropped = max(0, len(page.items) - limit)
-                cut = None if more and remaining is None else (remaining or 0) + dropped
-                return NamespaceList(namespaces=names, cut=cut, more_available=more or dropped > 0)
+            def read_namespaces(api_client: Any) -> NamespaceList:
+                page = self.core_factory(api_client).list_namespace(
+                    limit=limit, _request_timeout=self.settings.request_timeout_s
+                )
+                result = bounded_page(page, limit, lambda item: str(item.metadata.name))
+                return NamespaceList(
+                    items=result.items,
+                    cut=result.cut,
+                    more_available=result.more_available,
+                    truncation=result.truncation,
+                )
 
-            try:
-                result = run_bounded(read_namespaces, self.settings.request_timeout_s)
-                return result.model_dump_json(), result
-            except Exception as exc:
-                raise ToolException(f"Namespace read failed: {exc}") from exc
+            return bounded_response(
+                KubeReader(self.settings, self.client_factory).read(read_namespaces)
+            )
 
         k8s_list_namespaces.metadata = {"read_only": True}
         return [

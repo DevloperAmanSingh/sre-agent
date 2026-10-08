@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from opensre.connectors.kubernetes.reader import BoundedResult
+
 
 class PodSummary(BaseModel):
     name: str
@@ -93,14 +95,14 @@ class EventSummary(BaseModel):
     last_seen: datetime | None
 
 
-class PodLogs(BaseModel):
+class PodLogs(BoundedResult):
     text: str
     cut: int
     server_cap_bytes: int
     truncation: str
 
 
-class DeploymentDetail(BaseModel):
+class DeploymentDetail(BoundedResult):
     name: str
     namespace: str
     strategy: str | None
@@ -109,7 +111,7 @@ class DeploymentDetail(BaseModel):
     cut: dict[str, int] = Field(default_factory=dict)
 
 
-class PodDetail(BaseModel):
+class PodDetail(BoundedResult):
     name: str
     namespace: str
     containers: list[Container]

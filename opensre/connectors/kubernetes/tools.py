@@ -8,7 +8,7 @@ from pydantic import Field
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
 from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
-from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page, bounded_response
 from opensre.connectors.kubernetes.workloads import workload_tools
 from opensre.output import cap_text
 
@@ -52,7 +52,7 @@ def read_tools(
             return bounded_page(page, limit, lambda pod: pod_summary(pod, now()))
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_describe_pod(name: str, namespace: str | None = None) -> tuple[str, PodDetail]:
@@ -81,7 +81,7 @@ def read_tools(
             )
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_pod_logs(
@@ -105,15 +105,21 @@ def read_tools(
             if container:
                 kwargs["container"] = container
             text = str(core_factory(api).read_namespaced_pod_log(**kwargs) or "")
-            return PodLogs(
-                text=cap_text(text, 16000),
+            shown = 16000
+            result = PodLogs(
+                text=cap_text(text, shown),
                 cut=max(0, len(text) - 16000),
                 server_cap_bytes=16000,
                 truncation="Tail only; API limit 16000 bytes; older omitted count unknown",
             )
+            while len(result.model_dump_json()) > 20000:
+                shown //= 2
+                result.text = cap_text(text, shown)
+                result.cut = max(0, len(text) - shown)
+            return result
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     @tool(response_format="content_and_artifact")
     def k8s_list_events(
@@ -147,7 +153,7 @@ def read_tools(
             )
 
         result = reader.read(read)
-        return result.model_dump_json(), result
+        return bounded_response(result)
 
     tools: list[BaseTool] = [
         k8s_list_pods,

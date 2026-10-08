@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from threading import Thread
 from time import perf_counter
 from typing import Any, cast
 
@@ -41,16 +42,31 @@ def check_kube(
     client_factory: Callable[[KubeSettings], AbstractContextManager[Any]] = create_client,
     version_factory: Callable[[Any], Any] = client.VersionApi,
 ) -> CheckResult:
-    try:
-        with client_factory(settings) as api_client:
-            version = version_factory(api_client).get_code(
-                _request_timeout=settings.request_timeout_s
-            )
-        if not isinstance(version.git_version, str):
-            raise ValueError("Version endpoint returned no server version")
-        return CheckResult(name="kubernetes", ok=True, detail=version.git_version)
-    except Exception as exc:
-        return CheckResult(name="kubernetes", ok=False, detail=str(exc))
+    results: list[CheckResult] = []
+
+    def run() -> None:
+        try:
+            with client_factory(settings) as api_client:
+                version = version_factory(api_client).get_code(
+                    _request_timeout=settings.request_timeout_s
+                )
+            if not isinstance(version.git_version, str):
+                raise ValueError("Version endpoint returned no server version")
+            result = CheckResult(name="kubernetes", ok=True, detail=version.git_version)
+        except Exception as exc:
+            result = CheckResult(name="kubernetes", ok=False, detail=str(exc))
+        results.append(result)
+
+    worker = Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(settings.request_timeout_s)
+    if worker.is_alive():
+        return CheckResult(
+            name="kubernetes",
+            ok=False,
+            detail=f"timed out after {settings.request_timeout_s:g}s",
+        )
+    return results[0]
 
 
 def check_llm(

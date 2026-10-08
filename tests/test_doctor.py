@@ -1,5 +1,6 @@
 import json
 from contextlib import nullcontext
+from threading import Event, current_thread
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,43 @@ def test_kube_result(failure):
     )
     assert result.ok is not failure
     assert result.detail == ("cluster unreachable" if failure else "v1.35.0")
+
+
+@pytest.mark.parametrize("stage", ["credentials", "version"])
+def test_kube_deadline(stage):
+    release = Event()
+    finished = Event()
+    timeout = 0.003
+
+    def slow():
+        assert current_thread().daemon
+        release.wait()
+        finished.set()
+
+    def client_factory(settings):
+        if stage == "credentials":
+            slow()
+        return nullcontext(object())
+
+    def version_factory(client):
+        def get_code(**kwargs):
+            if stage == "version":
+                slow()
+            return SimpleNamespace(git_version="v1.35.0")
+
+        return SimpleNamespace(get_code=get_code)
+
+    try:
+        result = check_kube(
+            KubeSettings(request_timeout_s=timeout),
+            client_factory=client_factory,
+            version_factory=version_factory,
+        )
+        assert not result.ok
+        assert result.detail == "timed out after 0.003s"
+    finally:
+        release.set()
+        assert finished.wait(1)
 
 
 @pytest.mark.parametrize("output", ["table", "json"])

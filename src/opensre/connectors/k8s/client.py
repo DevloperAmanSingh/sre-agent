@@ -26,4 +26,5 @@ def create_client(
         if settings.context is not None:
             raise
         load_cluster(client_configuration=configuration)
+    configuration.retries = 0
     return client.ApiClient(configuration=configuration)

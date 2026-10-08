@@ -21,6 +21,7 @@ def test_isolated_client(in_cluster):
 
     settings = KubeSettings(context=None if in_cluster else "demo")
     with create_client(settings, kube_loader=kube_loader, cluster_loader=cluster_loader) as client:
+        assert client.configuration.retries == 0
         assert client.configuration.host == (
             "https://incluster.example" if in_cluster else "https://kube.example"
         )

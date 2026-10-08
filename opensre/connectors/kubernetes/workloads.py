@@ -13,8 +13,8 @@ from opensre.connectors.kubernetes.details import (
 from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
-from opensre.connectors.kubernetes.redaction import redact
 from opensre.output import cap_text
+from opensre.redaction import redact
 
 
 def label_selector(selector: Any) -> str:

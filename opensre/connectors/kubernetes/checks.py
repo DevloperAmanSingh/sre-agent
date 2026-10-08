@@ -10,10 +10,10 @@ from opensre.connectors.kubernetes.models import (
     Termination,
 )
 from opensre.connectors.kubernetes.reader import KubeReader
-from opensre.connectors.kubernetes.redaction import redact
 from opensre.connectors.kubernetes.snapshot import Snapshot, acquire_snapshot
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
 from opensre.output import cap_text
+from opensre.redaction import redact
 
 
 def finding(

@@ -10,8 +10,8 @@ from opensre.connectors.kubernetes.models import (
     Probe,
     Termination,
 )
-from opensre.connectors.kubernetes.redaction import redact
 from opensre.output import cap_text
+from opensre.redaction import redact
 
 
 def recent(timestamp: datetime | None, now: datetime) -> bool:

@@ -270,7 +270,7 @@ def test_probe_failures_only_use_recent_events_for_current_pods(message, uid, mi
         assert findings[0].severity == "warning"
         assert findings[0].reason == "ProbeFailure"
         assert findings[0].evidence[0].source == "k8s_list_events"
-        from opensre.connectors.kubernetes.redaction import redact
+        from opensre.redaction import redact
 
         assert redact(message) in findings[0].evidence[0].detail
         assert "synthetic-secret" not in findings[0].model_dump_json()

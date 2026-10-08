@@ -14,7 +14,7 @@ Suggested fix            add DATABASE_URL to deployment/checkout from secret db-
 Confidence               86%
 ```
 
-> **Status: early development.** Working today: `doctor`, `tools`, `ask`, and the Kubernetes connector with one tool (list namespaces).
+> **Status: early development.** Working today: `doctor`, `tools`, `ask`, and `scan`; Kubernetes provides 10 read-only tools and 7 quick checks.
 
 ## How it works
 
@@ -78,6 +78,7 @@ uv run opensre ask "what namespaces exist?"
 | `opensre doctor` | Checks each connector's health and the model keys. `--live` sends one tiny prompt per model. `--json` for scripts. |
 | `opensre tools` | Lists every tool the agent can use and where it comes from, after the read-only lock. |
 | `opensre ask "<question>"` | Runs an investigation and prints a diagnosis. `--json` for scripts. |
+| `opensre scan` | Runs enabled connectors' quick checks without AI. `-n/--namespace` overrides the namespace; `--json` for scripts. |
 
 Exit codes: `0` ok, `1` a check or investigation failed, `2` invalid configuration.
 

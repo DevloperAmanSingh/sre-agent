@@ -33,10 +33,13 @@ def collect_tools(connectors: Sequence[Connector]) -> ToolSnapshot:
     return ToolSnapshot(tuple(tools), MappingProxyType(sources))
 
 
-def build_connectors(settings: Settings) -> list[Connector]:
+def build_connectors(settings: Settings, *, namespace: str | None = None) -> list[Connector]:
     connectors: list[Connector] = []
     if settings.connectors.kubernetes.enabled:
         from opensre.connectors.kubernetes.connector import KubernetesConnector
 
-        connectors.append(KubernetesConnector(settings.connectors.kubernetes))
+        kube = settings.connectors.kubernetes
+        if namespace is not None:
+            kube = kube.model_copy(update={"namespace": namespace})
+        connectors.append(KubernetesConnector(kube))
     return connectors

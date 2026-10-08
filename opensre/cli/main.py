@@ -10,6 +10,7 @@ from opensre.config import ConfigError, Settings, load_settings
 from opensre.connectors.registry import build_connectors, collect_tools
 from opensre.doctor import diagnose_setup
 from opensre.output import cap_text
+from opensre.scan import run_checks
 
 app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
 
@@ -65,6 +66,40 @@ def doctor(
                 f"{result.latency_s:.3f}s" if result.latency_s is not None else "—",
             )
         Console().print(table)
+    raise typer.Exit(0 if report.ok else 1)
+
+
+@app.command()
+def scan(
+    ctx: typer.Context,
+    namespace: Annotated[str | None, typer.Option("--namespace", "-n")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run quick checks across enabled connectors without AI."""
+    settings = cast(Settings, ctx.obj)
+    connectors = (
+        build_connectors(settings, namespace=namespace)
+        if namespace is not None
+        else build_connectors(settings)
+    )
+    report = run_checks(connectors)
+    if json_output:
+        typer.echo(report.model_dump_json())
+    else:
+        table = Table("Severity", "Resource", "Reason", "Evidence")
+        for finding in report.findings:
+            table.add_row(
+                finding.severity.value,
+                finding.resource,
+                finding.reason,
+                "\n".join(f"{item.source}: {item.detail}" for item in finding.evidence),
+            )
+        if report.findings:
+            Console().print(table)
+        for error in report.errors:
+            typer.echo(f"Scan failed ({error.name}): {error.detail}", err=True)
+        if report.ok:
+            typer.echo("No findings.")
     raise typer.Exit(0 if report.ok else 1)
 
 

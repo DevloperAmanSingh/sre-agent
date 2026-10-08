@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import nullcontext
 from threading import Event, current_thread
 from types import SimpleNamespace
@@ -34,13 +35,16 @@ def test_kube_result(failure):
 @pytest.mark.parametrize("stage", ["credentials", "version"])
 def test_kube_deadline(stage):
     release = Event()
-    finished = Event()
+    started = Event()
+    workers = []
     timeout = 0.003
 
     def slow():
-        assert current_thread().daemon
+        worker = current_thread()
+        assert worker.daemon
+        workers.append(worker)
+        started.set()
         release.wait()
-        finished.set()
 
     def client_factory(settings):
         if stage == "credentials":
@@ -65,7 +69,9 @@ def test_kube_deadline(stage):
         assert result.detail == "timed out after 0.003s"
     finally:
         release.set()
-        assert finished.wait(1)
+        assert started.wait(1)
+        workers[0].join(1)
+        assert not workers[0].is_alive()
 
 
 @pytest.mark.parametrize("output", ["table", "json"])
@@ -102,6 +108,65 @@ def test_doctor_exit_and_output(output, failure, monkeypatch):
         assert f"llm.{failure}" in response.stdout
         assert "nonesuch/model" in response.stdout
         assert "Provider List" not in response.stdout
+
+
+@pytest.mark.parametrize("output", ["table", "json"])
+@pytest.mark.parametrize("version_fails", [False, True])
+def test_kube_diagnostics_are_owned(output, version_fails, monkeypatch, caplog, capsys):
+    from opensre.cli import main
+
+    loggers = [logging.getLogger(name) for name in ("", "kubernetes", "urllib3.connectionpool")]
+    before = [
+        (logger.level, logger.propagate, list(logger.handlers), list(logger.filters))
+        for logger in loggers
+    ]
+
+    def noisy_factory(settings):
+        logging.log(
+            logging.WARNING if version_fails else logging.ERROR,
+            "exec: simulated credential error %s",
+            "x" * 3000,
+        )
+        logging.getLogger("kubernetes").warning("kube warning")
+        logging.getLogger("urllib3.connectionpool").warning("transport warning")
+        return nullcontext(object())
+
+    def version_factory(client):
+        def get_code(**kwargs):
+            if version_fails:
+                raise RuntimeError("connection failed")
+            return SimpleNamespace(git_version="v1.35.0")
+
+        return SimpleNamespace(get_code=get_code)
+
+    monkeypatch.setattr(
+        main,
+        "check_kube",
+        lambda settings: check_kube(
+            settings, client_factory=noisy_factory, version_factory=version_factory
+        ),
+    )
+    response = CliRunner().invoke(app, ["doctor", *(["--json"] if output == "json" else [])])
+    assert response.exit_code == 1
+    assert "simulated credential" in response.stdout
+    assert "characters cut" in response.stdout
+    assert response.stderr == ""
+    if output == "json":
+        result = json.loads(response.stdout)["checks"][0]
+        assert not result["ok"]
+        assert "simulated credential error" in result["detail"]
+        assert ("connection failed" if version_fails else "credential loading failed") in result[
+            "detail"
+        ]
+        assert len(result["detail"]) < 2100
+    assert caplog.text == ""
+    assert capsys.readouterr().err == ""
+    assert before == [
+        (logger.level, logger.propagate, list(logger.handlers), list(logger.filters))
+        for logger in loggers
+    ]
+    logging.warning("unrelated logging remains enabled")
+    assert "unrelated logging remains enabled" in caplog.text
 
 
 @pytest.mark.parametrize("failure", [False, True])

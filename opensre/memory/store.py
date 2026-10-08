@@ -2,7 +2,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -168,6 +168,13 @@ class IncidentStore:
             )
             for _, incident in matches
         ]
+
+    def prune(self, older_than: timedelta) -> int:
+        if older_than <= timedelta(0):
+            raise ValueError("Age must be positive")
+        cutoff = (self.now() - older_than).astimezone(UTC).isoformat()
+        with self.connect() as db:
+            return db.execute("DELETE FROM incidents WHERE created_at < ?", (cutoff,)).rowcount
 
     def list_recent(self, limit: int = 20) -> list[Incident]:
         if not 1 <= limit <= 1000:

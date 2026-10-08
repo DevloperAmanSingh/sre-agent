@@ -82,6 +82,18 @@ def test_recall_filters_ranking_age_and_limit(store, diagnosis):
     assert store.similar('["kubernetes/prod"]', []) == []
 
 
+def test_prune_by_injected_time(store, diagnosis):
+    old = save(store, diagnosis)
+    store.now = lambda: NOW + timedelta(days=90)
+    boundary = save(store, diagnosis)
+    store.now = lambda: NOW + timedelta(days=180)
+    assert store.prune(timedelta(days=90)) == 1
+    assert store.get(old) is None
+    assert store.get(boundary) is not None
+    with pytest.raises(ValueError):
+        store.prune(timedelta(days=-1))
+
+
 def test_round_trip_schema_and_redaction(store, diagnosis, tmp_path):
     incident_id = save(store, diagnosis)
     incident = store.get(incident_id)

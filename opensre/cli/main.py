@@ -10,7 +10,7 @@ from opensre.config import ConfigError, Settings, load_settings
 from opensre.connectors.registry import build_connectors
 from opensre.doctor import diagnose_setup
 
-app = typer.Typer(name="opensre", help="Read-only Kubernetes SRE assistant.")
+app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
 
 
 @app.callback(invoke_without_command=True)
@@ -65,3 +65,20 @@ def doctor(
             )
         Console().print(table)
     raise typer.Exit(0 if report.ok else 1)
+
+
+@app.command()
+def tools(ctx: typer.Context) -> None:
+    """List effective read-only agent tools by source, without contacting targets."""
+    from opensre.agents.lock import check_lock
+
+    settings = cast(Settings, ctx.obj)
+    try:
+        sources = check_lock(build_connectors(settings))
+    except Exception as exc:
+        typer.echo(f"Tool self-check failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    table = Table("Tool", "Source")
+    for name, source in sorted(sources.items()):
+        table.add_row(name, source)
+    Console().print(table)

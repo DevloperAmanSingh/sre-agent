@@ -4,6 +4,9 @@ connectors:
     context: null
     namespace: default
     request_timeout_s: 10
+memory:
+  enabled: true
+  dir: ~/.opensre
 llm:
   primary: deepseek/deepseek-chat
   fallback: openai/gpt-5.6-luna

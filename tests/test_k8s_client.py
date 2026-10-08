@@ -5,7 +5,7 @@ from kubernetes.client import Configuration
 from kubernetes.config import ConfigException
 
 from opensre.config import KubeSettings
-from opensre.connectors.k8s.client import create_client
+from opensre.connectors.kubernetes.client import create_client
 
 
 @pytest.mark.parametrize("source", ["home", "env", "env-list"])

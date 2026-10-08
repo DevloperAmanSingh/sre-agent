@@ -1,7 +1,6 @@
 import json
 import logging
 from contextlib import nullcontext
-from threading import Event, current_thread
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,8 @@ from typer.testing import CliRunner
 
 from opensre.cli.main import app
 from opensre.config import KubeSettings, LLMSettings
-from opensre.doctor import check_kube, check_llm
+from opensre.connectors.kubernetes.health import check_kube
+from opensre.doctor import check_llm
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -33,45 +33,27 @@ def test_kube_result(failure):
 
 
 @pytest.mark.parametrize("stage", ["credentials", "version"])
-def test_kube_deadline(stage):
-    release = Event()
-    started = Event()
-    workers = []
-    timeout = 0.003
-
-    def slow():
-        worker = current_thread()
-        assert worker.daemon
-        workers.append(worker)
-        started.set()
-        release.wait()
-
+def test_kube_deadline(stage, deadline):
     def client_factory(settings):
         if stage == "credentials":
-            slow()
+            deadline()
         return nullcontext(object())
 
     def version_factory(client):
         def get_code(**kwargs):
             if stage == "version":
-                slow()
+                deadline()
             return SimpleNamespace(git_version="v1.35.0")
 
         return SimpleNamespace(get_code=get_code)
 
-    try:
-        result = check_kube(
-            KubeSettings(request_timeout_s=timeout),
-            client_factory=client_factory,
-            version_factory=version_factory,
-        )
-        assert not result.ok
-        assert result.detail == "timed out after 0.003s"
-    finally:
-        release.set()
-        assert started.wait(1)
-        workers[0].join(1)
-        assert not workers[0].is_alive()
+    result = check_kube(
+        KubeSettings(request_timeout_s=3),
+        client_factory=client_factory,
+        version_factory=version_factory,
+    )
+    assert not result.ok
+    assert result.detail == "timed out after 3s"
 
 
 @pytest.mark.parametrize("output", ["table", "json"])
@@ -88,7 +70,9 @@ def test_doctor_exit_and_output(output, failure, monkeypatch):
         ok=failure != "kube",
         detail="unreachable" if failure == "kube" else "v1.35.0",
     )
-    monkeypatch.setattr(main, "check_kube", lambda settings: result)
+    monkeypatch.setattr(
+        main, "build_connectors", lambda settings: [SimpleNamespace(health=lambda: result)]
+    )
     flags = [f"--{failure}", "nonesuch/model"] if failure in ("primary", "fallback") else []
     response = CliRunner().invoke(
         app, [*flags, "doctor", *(["--json"] if output == "json" else [])]
@@ -141,10 +125,16 @@ def test_kube_diagnostics_are_owned(output, version_fails, monkeypatch, caplog, 
 
     monkeypatch.setattr(
         main,
-        "check_kube",
-        lambda settings: check_kube(
-            settings, client_factory=noisy_factory, version_factory=version_factory
-        ),
+        "build_connectors",
+        lambda settings: [
+            SimpleNamespace(
+                health=lambda: check_kube(
+                    settings.connectors.kubernetes,
+                    client_factory=noisy_factory,
+                    version_factory=version_factory,
+                )
+            )
+        ],
     )
     response = CliRunner().invoke(app, ["doctor", *(["--json"] if output == "json" else [])])
     assert response.exit_code == 1

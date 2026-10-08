@@ -7,9 +7,11 @@ from rich.console import Console
 from rich.table import Table
 
 from opensre.config import ConfigError, Settings, load_settings
-from opensre.doctor import DoctorReport, check_kube, check_llm
+from opensre.connectors.registry import build_connectors, collect_tools
+from opensre.doctor import diagnose_setup
+from opensre.output import cap_text
 
-app = typer.Typer(name="opensre", help="Read-only Kubernetes SRE assistant.")
+app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
 
 
 @app.callback(invoke_without_command=True)
@@ -35,6 +37,7 @@ def main(
         section: {key: value for key, value in fields.items() if value is not None}
         for section, fields in overrides.items()
     }
+    overrides["connectors"] = {"kubernetes": overrides.pop("kube")}
     try:
         ctx.obj = load_settings(config, overrides)
     except ConfigError as exc:
@@ -49,7 +52,7 @@ def doctor(
     json_output: Annotated[bool, typer.Option("--json", help="Print a JSON report.")] = False,
 ) -> None:
     settings = cast(Settings, ctx.obj)
-    report = DoctorReport(checks=[check_kube(settings.kube), *check_llm(settings.llm, live=live)])
+    report = diagnose_setup(build_connectors(settings), settings.llm, live=live)
     if json_output:
         typer.echo(report.model_dump_json())
     else:
@@ -63,3 +66,48 @@ def doctor(
             )
         Console().print(table)
     raise typer.Exit(0 if report.ok else 1)
+
+
+@app.command()
+def tools(ctx: typer.Context) -> None:
+    """List effective read-only agent tools by source, without contacting targets."""
+    settings = cast(Settings, ctx.obj)
+    try:
+        from opensre.agents.lock import inspect_tools
+
+        sources = inspect_tools(collect_tools(build_connectors(settings)))
+    except Exception as exc:
+        typer.echo(f"Tool self-check failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    table = Table("Tool", "Source")
+    for name, source in sorted(sources.items()):
+        table.add_row(name, source)
+    Console().print(table)
+
+
+@app.command()
+def ask(
+    ctx: typer.Context,
+    question: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Print a JSON diagnosis.")] = False,
+) -> None:
+    """Investigate a question using read-only tools and markdown skills."""
+    settings = cast(Settings, ctx.obj)
+    try:
+        from opensre.agents.run import investigate
+
+        diagnosis = investigate(question, build_connectors(settings), settings.llm)
+    except Exception as exc:
+        typer.echo(f"Investigation failed: {cap_text(str(exc), 2000)}", err=True)
+        raise typer.Exit(1) from exc
+    if json_output:
+        typer.echo(diagnosis.model_dump_json())
+        return
+    table = Table("Diagnosis", "Detail")
+    table.add_row("Summary", diagnosis.summary)
+    table.add_row("Cause", diagnosis.cause)
+    for evidence in diagnosis.evidence:
+        table.add_row(f"Evidence ({evidence.source})", evidence.detail)
+    table.add_row("Suggested fix", diagnosis.suggested_fix)
+    table.add_row("Confidence", f"{diagnosis.confidence:.0%}")
+    Console().print(table)

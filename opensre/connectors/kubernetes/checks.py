@@ -35,7 +35,21 @@ def terminations(container: ContainerObservation) -> list[Termination]:
     return [term for term in (container.current_termination, container.last_termination) if term]
 
 
+def oom_terms(container: ContainerObservation, now: datetime) -> list[Termination]:
+    return sorted(
+        [
+            term
+            for term in terminations(container)
+            if term.reason == "OOMKilled" and recent(term.finished_at, now)
+        ],
+        key=lambda term: term.finished_at or now,
+        reverse=True,
+    )
+
+
 def crashing(container: ContainerObservation, policy: str, now: datetime) -> bool:
+    if oom_terms(container, now):
+        return False
     if container.state_kind == "waiting" and container.state == "CrashLoopBackOff":
         return True
     failures = {
@@ -73,21 +87,36 @@ def image_pull(pod: PodObservation, now: datetime) -> list[Finding]:
 
 
 def oom(pod: PodObservation, now: datetime) -> list[Finding]:
-    return [
-        finding(
+    findings: list[Finding] = []
+    for container in pod.containers:
+        terms = oom_terms(container, now)
+        if not terms:
+            continue
+        latest = terms[0]
+        result = finding(
             pod,
             "OOMKilled",
-            f"Container {container.name}: OOMKilled exit={term.exit_code} at {term.finished_at}",
+            f"Container {container.name}: OOMKilled exit={latest.exit_code} "
+            f"at {latest.finished_at}",
         )
-        for container in pod.containers
-        for term in terminations(container)
-        if term.reason == "OOMKilled" and recent(term.finished_at, now)
-    ]
+        for older in terms[1:]:
+            if older != latest:
+                result.evidence.append(
+                    Evidence(
+                        source="k8s_describe_pod",
+                        detail=f"Container {container.name}: older OOMKilled "
+                        f"at {older.finished_at}",
+                    )
+                )
+        findings.append(result)
+    return findings
 
 
 def restarts(pod: PodObservation, now: datetime) -> list[Finding]:
     findings: list[Finding] = []
     for container in pod.containers:
+        if crashing(container, pod.restart_policy, now) or oom_terms(container, now):
+            continue
         term = container.last_termination
         if not container.restart_count or not term or not recent(term.finished_at, now):
             continue

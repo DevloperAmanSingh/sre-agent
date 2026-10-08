@@ -53,22 +53,41 @@ def test_crashloop_detects_current_state_in_regular_and_init_containers(
     assert finding.reason == "CrashLoopBackOff"
     assert finding.evidence[0].source == "k8s_describe_pod"
     assert "app" in finding.evidence[0].detail
+    assert run_rule(target, "restarts") == []
 
 
 @pytest.mark.parametrize("minutes,expected", [(5, 1), (60, 1), (61, 0), (-1, 0), (None, 0)])
-def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(minutes, expected):
+@pytest.mark.parametrize("current_oom,sidecar_oom", [(False, False), (True, False), (True, True)])
+def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(
+    minutes, expected, current_oom, sidecar_oom
+):
     timestamp = NOW - timedelta(minutes=minutes) if minutes is not None else None
     app = container_status(term=NS(reason="OOMKilled", exit_code=137, finished_at=timestamp))
     sidecar = container_status(term=NS(reason="Completed", exit_code=0, finished_at=NOW))
     sidecar.name = "sidecar"
-    findings = run_rule(
-        connector(list_namespaced_pod=lambda **kwargs: page([pod([app, sidecar])])), "oom"
-    )
-    assert len(findings) == expected
+    app.restart_count = 2
+    if current_oom and timestamp:
+        app.state.terminated = NS(
+            reason="OOMKilled", exit_code=137, finished_at=timestamp + timedelta(seconds=1)
+        )
+        app.ready = False
+    if sidecar_oom:
+        sidecar.last_state = app.last_state
+        sidecar.state = app.state
+        sidecar.ready = app.ready
+        sidecar.restart_count = 2
+    target = connector(list_namespaced_pod=lambda **kwargs: page([pod([app, sidecar])]))
+    findings = run_rule(target, "oom")
+    assert len(findings) == expected * (2 if sidecar_oom else 1)
     if expected:
         assert findings[0].severity == "critical"
         assert findings[0].reason == "OOMKilled"
         assert "137" in findings[0].evidence[0].detail
+        if current_oom:
+            assert len(findings[0].evidence) == 2
+            assert str(timestamp + timedelta(seconds=1)) in findings[0].evidence[0].detail
+        assert run_rule(target, "crashloop") == []
+        assert run_rule(target, "restarts") == []
 
 
 @pytest.mark.parametrize(

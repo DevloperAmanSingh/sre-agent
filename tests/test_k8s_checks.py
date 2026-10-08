@@ -42,7 +42,7 @@ def test_crashloop_detects_current_state_in_regular_and_init_containers(
     status.state.terminated = (
         NS(reason="Error", exit_code=1, finished_at=NOW) if state == "terminated" else None
     )
-    obj = pod([status])
+    obj = pod([status], created=NOW - timedelta(minutes=20))
     obj.spec.restart_policy = policy
     if init:
         obj.status.init_container_statuses = obj.status.container_statuses
@@ -65,6 +65,7 @@ def test_crashloop_detects_current_state_in_regular_and_init_containers(
             == f"Container app: Error exit=1 at {NOW}, 2 failed runs in the last hour"
         )
     assert run_rule(target, "restarts") == []
+    assert run_rule(target, "not-ready") == []
 
 
 @pytest.mark.parametrize("minutes,expected", [(5, 1), (60, 1), (61, 0), (-1, 0), (None, 0)])
@@ -77,6 +78,7 @@ def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(
     sidecar = container_status(term=NS(reason="Completed", exit_code=0, finished_at=NOW))
     sidecar.name = "sidecar"
     app.restart_count = 2
+    app.ready = False
     if current_oom and timestamp:
         app.state.terminated = NS(
             reason="OOMKilled", exit_code=137, finished_at=timestamp + timedelta(seconds=1)
@@ -87,7 +89,11 @@ def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(
         sidecar.state = app.state
         sidecar.ready = app.ready
         sidecar.restart_count = 2
-    target = connector(list_namespaced_pod=lambda **kwargs: page([pod([app, sidecar])]))
+    target = connector(
+        list_namespaced_pod=lambda **kwargs: page(
+            [pod([app, sidecar], created=NOW - timedelta(minutes=20))]
+        )
+    )
     findings = run_rule(target, "oom")
     assert len(findings) == expected * (2 if sidecar_oom else 1)
     if expected:
@@ -99,6 +105,7 @@ def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(
             assert str(timestamp + timedelta(seconds=1)) in findings[0].evidence[0].detail
         assert run_rule(target, "crashloop") == []
         assert run_rule(target, "restarts") == []
+        assert run_rule(target, "not-ready") == []
 
 
 @pytest.mark.parametrize(
@@ -112,10 +119,12 @@ def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(
     ],
 )
 def test_image_pull_failures_are_critical(reason, expected):
-    findings = run_rule(
-        connector(list_namespaced_pod=lambda **kwargs: page([pod([container_status(reason)])])),
-        "image-pull",
-    )
+    sidecar = container_status(ready=False)
+    sidecar.name = "sidecar"
+    obj = pod([container_status(reason, ready=False), sidecar], created=NOW - timedelta(minutes=20))
+    target = connector(list_namespaced_pod=lambda **kwargs: page([obj]))
+    findings = run_rule(target, "image-pull")
+    assert len(run_rule(target, "not-ready")) == (0 if expected else 1)
     assert len(findings) == expected
     if expected:
         assert findings[0].severity == "critical"

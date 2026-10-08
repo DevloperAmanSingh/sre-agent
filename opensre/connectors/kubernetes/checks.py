@@ -163,6 +163,8 @@ def restarts(pod: PodObservation, now: datetime) -> list[Finding]:
 def not_ready(pod: PodObservation, now: datetime) -> list[Finding]:
     if pod.phase != "Running" or pod.created is None or (now - pod.created).total_seconds() <= 600:
         return []
+    if crashloop(pod, now) or oom(pod, now) or image_pull(pod, now):
+        return []
     regular = [container for container in pod.containers if not container.init]
     condition = next((condition for condition in pod.conditions if condition.type == "Ready"), None)
     ready = (

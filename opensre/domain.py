@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from enum import StrEnum
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class CheckResult(BaseModel):
@@ -38,3 +38,11 @@ class Finding(BaseModel):
 class QuickCheck(BaseModel):
     name: str
     run: Callable[[], list[Finding]]
+
+
+class Diagnosis(BaseModel):
+    summary: str
+    cause: str
+    evidence: list[Evidence]
+    suggested_fix: str
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)

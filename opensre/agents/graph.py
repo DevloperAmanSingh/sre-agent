@@ -35,6 +35,7 @@ def build_agent(
     settings: LLMSettings | None = None,
     model: BaseChatModel | None = None,
     skills_root: Path = SKILLS_ROOT,
+    inspection: AgentMiddleware[Any, Any] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     chat = model if model is not None else build_model(settings or LLMSettings())
     provider = chat._get_ls_params().get("ls_provider")  # pyright: ignore[reportPrivateUsage]
@@ -51,6 +52,8 @@ def build_agent(
         ModelCallLimitMiddleware(run_limit=8, exit_behavior="error"),
         ToolCallLimitMiddleware(run_limit=16, exit_behavior="error"),
     ]
+    if inspection is not None:
+        middleware.append(inspection)
     return create_deep_agent(
         model=chat,
         tools=collect_tools(connectors),

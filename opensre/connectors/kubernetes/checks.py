@@ -29,12 +29,22 @@ def finding(
     )
 
 
-def crashloop(pod: Any, now: datetime) -> list[Finding]:
+def waiting_failures(pod: Any, reasons: set[str]) -> list[Finding]:
     return [
-        finding(pod, "CrashLoopBackOff", f"Container {status.name} is waiting in CrashLoopBackOff")
+        finding(pod, reason, f"Container {status.name} is waiting in {reason}")
         for status in statuses(pod)
-        if getattr(getattr(status.state, "waiting", None), "reason", None) == "CrashLoopBackOff"
+        if (reason := getattr(getattr(status.state, "waiting", None), "reason", None)) in reasons
     ]
+
+
+def crashloop(pod: Any, now: datetime) -> list[Finding]:
+    return waiting_failures(pod, {"CrashLoopBackOff"})
+
+
+def image_pull(pod: Any, now: datetime) -> list[Finding]:
+    return waiting_failures(
+        pod, {"ImagePullBackOff", "ErrImagePull", "InvalidImageName", "ErrImageNeverPull"}
+    )
 
 
 def recent(timestamp: datetime | None, now: datetime) -> bool:
@@ -104,4 +114,4 @@ def quick_checks(
 
         return QuickCheck(name=name, run=run)
 
-    return [check("crashloop", crashloop), check("oom", oom)]
+    return [check("crashloop", crashloop), check("oom", oom), check("image-pull", image_pull)]

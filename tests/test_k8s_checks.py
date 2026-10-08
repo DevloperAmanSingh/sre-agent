@@ -40,3 +40,24 @@ def test_recent_oom_is_detected_per_container_not_hidden_by_clean_sidecar(minute
         assert findings[0].severity == "critical"
         assert findings[0].reason == "OOMKilled"
         assert "137" in findings[0].evidence[0].detail
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("ImagePullBackOff", 1),
+        ("ErrImagePull", 1),
+        ("InvalidImageName", 1),
+        ("ErrImageNeverPull", 1),
+        (None, 0),
+    ],
+)
+def test_image_pull_failures_are_critical(reason, expected):
+    findings = run_rule(
+        connector(list_namespaced_pod=lambda **kwargs: page([pod([container_status(reason)])])),
+        "image-pull",
+    )
+    assert len(findings) == expected
+    if expected:
+        assert findings[0].severity == "critical"
+        assert findings[0].reason == reason

@@ -167,6 +167,18 @@ def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
     ]
 
 
+def probes(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
+    return [
+        finding(
+            pod, "ProbeFailure", cap_text(event.message, 2000), Severity.WARNING, "k8s_list_events"
+        )
+        for event in pod_events(pod, events, now)
+        if event.reason == "Unhealthy"
+        and event.type == "Warning"
+        and "probe failed" in (event.message or "").casefold()
+    ]
+
+
 class Snapshot:
     def __init__(self, reader: KubeReader, core_factory: Callable[[Any], Any]) -> None:
         self.reader = reader
@@ -228,6 +240,14 @@ def quick_checks(
 
         return reader.read(read)
 
+    def run_probes() -> list[Finding]:
+        def read(api: Any) -> list[Finding]:
+            pods = snapshot.pods(api)
+            events = snapshot.events(api) if pods else []
+            return [item for pod in pods for item in probes(pod, events, timestamp)]
+
+        return reader.read(read)
+
     return [
         check("crashloop", crashloop),
         check("oom", oom),
@@ -235,4 +255,5 @@ def quick_checks(
         check("not-ready", not_ready),
         check("restarts", restarts),
         QuickCheck(name="pending", run=run_pending),
+        QuickCheck(name="probes", run=run_probes),
     ]

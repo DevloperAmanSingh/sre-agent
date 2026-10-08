@@ -151,3 +151,30 @@ def test_restart_warning_requires_recent_failed_termination_not_lifetime_count(
         assert findings[0].severity == "warning"
         assert findings[0].reason == "RecentRestart"
         assert "Error" in findings[0].evidence[0].detail
+
+
+@pytest.mark.parametrize(
+    "message,uid,minutes,expected",
+    [
+        ("Readiness probe failed: connection refused", "pod-1", 5, 1),
+        ("Liveness probe failed: timeout", "pod-1", 5, 1),
+        ("Startup probe failed: timeout", "pod-1", 5, 1),
+        ("Readiness probe failed", "old-pod", 5, 0),
+        ("Readiness probe failed", "pod-1", 61, 0),
+        ("Failed mount", "pod-1", 5, 0),
+    ],
+)
+def test_probe_failures_only_use_recent_events_for_current_pods(message, uid, minutes, expected):
+    target = connector(
+        list_namespaced_pod=lambda **kwargs: page([pod()]),
+        list_namespaced_event=lambda **kwargs: page(
+            [event(reason="Unhealthy", message=message, uid=uid, minutes=minutes)]
+        ),
+    )
+    findings = run_rule(target, "probes")
+    assert len(findings) == expected
+    if expected:
+        assert findings[0].severity == "warning"
+        assert findings[0].reason == "ProbeFailure"
+        assert findings[0].evidence[0].source == "k8s_list_events"
+        assert message in findings[0].evidence[0].detail

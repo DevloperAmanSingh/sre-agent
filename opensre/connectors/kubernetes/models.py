@@ -45,6 +45,14 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class DeploymentSummary(BaseModel):
+    name: str
+    desired: int
+    ready: int
+    available: int
+    updated: int
+
+
 class EventSummary(BaseModel):
     type: str | None
     reason: str | None

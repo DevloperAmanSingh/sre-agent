@@ -21,6 +21,8 @@ def connector(**methods):
         KubeSettings(namespace="production", request_timeout_s=3),
         client_factory=lambda settings: nullcontext(object()),
         core_factory=lambda client: api,
+        apps_factory=lambda client: api,
+        now=lambda: NOW,
     )
 
 

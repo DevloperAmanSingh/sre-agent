@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from kubernetes import client  # pyright: ignore[reportMissingTypeStubs]
@@ -31,11 +32,15 @@ class KubernetesConnector:
         client_factory: Callable[[KubeSettings], AbstractContextManager[Any]] = create_client,
         core_factory: Callable[[Any], Any] = client.CoreV1Api,
         version_factory: Callable[[Any], Any] = client.VersionApi,
+        apps_factory: Callable[[Any], Any] = client.AppsV1Api,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.settings = settings
         self.client_factory = client_factory
         self.core_factory = core_factory
         self.version_factory = version_factory
+        self.apps_factory = apps_factory
+        self.now = now
 
     def health(self) -> CheckResult:
         return check_kube(
@@ -71,7 +76,12 @@ class KubernetesConnector:
         k8s_list_namespaces.metadata = {"read_only": True}
         return [
             k8s_list_namespaces,
-            *read_tools(KubeReader(self.settings, self.client_factory), self.core_factory),
+            *read_tools(
+                KubeReader(self.settings, self.client_factory),
+                self.core_factory,
+                self.apps_factory,
+                self.now,
+            ),
         ]
 
     def checks(self) -> list[QuickCheck]:

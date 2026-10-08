@@ -25,7 +25,7 @@ def test_list_pods_returns_health_summary_and_uses_default_or_override_namespace
             4,
             "worker",
         )
-        assert row.age_s >= 3600
+        assert row.age_s == 3600
         assert result.truncation == "showing 1 of 3"
 
 
@@ -127,3 +127,24 @@ def test_events_show_warnings_first_with_timestamps_and_counts():
     assert result.items[0].object == "Pod/checkout"
     assert result.items[0].count == 3
     assert result.items[0].last_seen == NOW
+
+
+def test_list_deployments_reports_replica_counts():
+    deployment = k.V1Deployment(
+        metadata=k.V1ObjectMeta(name="checkout"),
+        spec=k.V1DeploymentSpec(
+            replicas=3, selector=k.V1LabelSelector(), template=k.V1PodTemplateSpec()
+        ),
+        status=k.V1DeploymentStatus(ready_replicas=1, available_replicas=1, updated_replicas=2),
+    )
+    result = invoke(
+        connector(list_namespaced_deployment=lambda **kwargs: page([deployment])),
+        "k8s_list_deployments",
+    )
+    assert result.items[0].model_dump() == {
+        "name": "checkout",
+        "desired": 3,
+        "ready": 1,
+        "available": 1,
+        "updated": 2,
+    }

@@ -8,6 +8,7 @@ from pydantic import Field
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.connectors.kubernetes.workloads import workload_tools
 from opensre.output import cap_text
 
 Limit = Annotated[int, Field(ge=1, le=100)]
@@ -29,7 +30,12 @@ def pod_summary(pod: Any, now: datetime) -> PodSummary:
     )
 
 
-def read_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[BaseTool]:
+def read_tools(
+    reader: KubeReader,
+    core_factory: Callable[[Any], Any],
+    apps_factory: Callable[[Any], Any],
+    now: Callable[[], datetime],
+) -> list[BaseTool]:
     @tool(response_format="content_and_artifact")
     def k8s_list_pods(
         namespace: str | None = None, limit: Limit = 50
@@ -42,7 +48,7 @@ def read_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[B
                 limit=limit,
                 _request_timeout=reader.settings.request_timeout_s,
             )
-            return bounded_page(page, limit, lambda pod: pod_summary(pod, datetime.now(UTC)))
+            return bounded_page(page, limit, lambda pod: pod_summary(pod, now()))
 
         result = reader.read(read)
         return result.model_dump_json(), result
@@ -142,7 +148,13 @@ def read_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[B
         result = reader.read(read)
         return result.model_dump_json(), result
 
-    tools: list[BaseTool] = [k8s_list_pods, k8s_describe_pod, k8s_pod_logs, k8s_list_events]
+    tools: list[BaseTool] = [
+        k8s_list_pods,
+        k8s_describe_pod,
+        k8s_pod_logs,
+        k8s_list_events,
+        *workload_tools(reader, apps_factory),
+    ]
     for entry in tools:
         entry.metadata = {"read_only": True}
     return tools

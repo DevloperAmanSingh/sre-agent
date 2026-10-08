@@ -38,7 +38,7 @@ and `latency_s` (null unless a live request was attempted).
 
 ## Configuration
 
-Copy `opensre.example.yaml` to `opensre.yaml`:
+Copy `examples/opensre.yaml` to `opensre.yaml`:
 
 ```yaml
 kube:

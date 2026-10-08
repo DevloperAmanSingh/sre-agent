@@ -23,6 +23,9 @@ dev = ["pytest==9.1.1", "ruff==0.16.10", "pyright==1.1.414"]
 [tool.hatch.build.targets.wheel]
 packages = ["opensre"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "opensre/skills"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

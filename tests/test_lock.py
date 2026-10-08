@@ -28,7 +28,7 @@ def test_inspection_captures_effective_tools_without_running_connector():
 
 
 @pytest.mark.parametrize("name", ["task", "write_file", "edit_file", "execute", "unknown"])
-def test_guard_rechecks_tools_before_each_real_model_call(name, monkeypatch, tmp_path):
+def test_guard_rechecks_tools_before_each_real_model_call(name, monkeypatch):
     from opensre.agents import graph
 
     @tool(name)
@@ -62,7 +62,7 @@ def test_guard_rechecks_tools_before_each_real_model_call(name, monkeypatch, tmp
             )
         ]
     )
-    agent = graph.build_agent(collect_tools([]), model=model, skills_root=tmp_path)
+    agent = graph.build_agent(collect_tools([]), model=model)
     with pytest.raises(ValueError, match=f"forbidden.*{name}"):
         agent.invoke({"messages": [{"role": "user", "content": "Investigate"}]})
     assert model.index == 1

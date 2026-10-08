@@ -39,10 +39,10 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis():
 
 
 @pytest.mark.parametrize("tools_per_call", [1, 8])
-def test_agent_stops_runaway_calls(tmp_path, tools_per_call):
+def test_agent_stops_runaway_calls(tools_per_call):
     calls = [{"name": "ls", "args": {"path": "/"}, "id": str(i)} for i in range(tools_per_call)]
     model = ScriptedModel(responses=[AIMessage(content="", tool_calls=calls)])
-    agent = build_agent(collect_tools([]), model=model, skills_root=tmp_path)
+    agent = build_agent(collect_tools([]), model=model)
     with pytest.raises(Exception, match="limit"):
         agent.invoke(
             {"messages": [{"role": "user", "content": "Investigate"}]},

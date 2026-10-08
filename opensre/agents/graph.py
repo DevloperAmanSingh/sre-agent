@@ -21,7 +21,19 @@ from opensre.connectors.registry import ToolSnapshot
 from opensre.domain import Diagnosis
 from opensre.llm import build_model
 
-SKILLS_ROOT = Path(__file__).resolve().parents[2] / "skills"
+
+def resolve_skills_root() -> Path:
+    package = Path(__file__).resolve().parents[1]
+    bundled = package / "skills"
+    if bundled.is_dir():
+        return bundled
+    checkout = package.parent
+    if (checkout / "pyproject.toml").is_file():
+        return checkout / "skills"
+    raise ValueError("Bundled skills directory is missing")
+
+
+SKILLS_ROOT = resolve_skills_root()
 
 
 def build_agent(
@@ -31,6 +43,8 @@ def build_agent(
     model: BaseChatModel | None = None,
     skills_root: Path = SKILLS_ROOT,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
+    if not any(skills_root.rglob("SKILL.md")):
+        raise ValueError(f"No SKILL.md playbooks found in {skills_root}")
     chat = model if model is not None else build_model(settings or LLMSettings())
     backend = SkillsBackend(skills_root)
     middleware: list[AgentMiddleware[Any, Any]] = [

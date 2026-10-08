@@ -9,7 +9,8 @@ from opensre.connectors.base import Connector
 from opensre.connectors.registry import collect_tools
 from opensre.domain import Diagnosis, Investigation
 from opensre.llm import build_model
-from opensre.memory.store import IncidentStore, Signature, clean
+from opensre.memory.recall import format_recall
+from opensre.memory.store import IncidentStore, Signature
 from opensre.output import cap_text
 from opensre.scan import run_checks
 
@@ -42,28 +43,7 @@ def investigate(
         try:
             target = json.dumps(sorted(connector.target for connector in connectors))
             store = IncidentStore(memory.dir, now=now)
-            recalled = store.similar(target, signature)
-            if recalled:
-                entries = [
-                    f"{item.label} (#{item.incident.id}, {item.age}):\n"
-                    + cap_text(
-                        json.dumps(
-                            {
-                                "summary": clean(item.incident.summary, 500),
-                                "cause": clean(item.incident.cause, 700),
-                                "suggested_fix": clean(item.incident.suggested_fix, 700),
-                                "note": clean(item.incident.note, 700),
-                                "confidence": item.incident.confidence,
-                            },
-                            ensure_ascii=False,
-                        ),
-                        3200,
-                    )
-                    for item in recalled
-                ]
-                question += "\n\nPast incidents (from memory, may be outdated):\n" + "\n".join(
-                    entries
-                )
+            question += format_recall(store.similar(target, signature))
         except Exception:
             logger.warning("Memory recall unavailable; continuing without recall")
     if checks.findings or checks.errors:

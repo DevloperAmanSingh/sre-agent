@@ -109,6 +109,21 @@ class IncidentStore:
             row = db.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
         return decode(row) if row is not None else None
 
+    def set_feedback(
+        self, incident_id: int, status: Literal["right", "wrong"], note: str = ""
+    ) -> Incident:
+        if status not in ("right", "wrong"):
+            raise ValueError("Feedback must be right or wrong")
+        with self.connect() as db:
+            row = db.execute(
+                """UPDATE incidents SET status = ?, note = ?, feedback_at = ?
+                WHERE id = ? RETURNING *""",
+                (status, clean(note), self.now().astimezone(UTC).isoformat(), incident_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Unknown incident #{incident_id}")
+            return decode(row)
+
     def list_recent(self, limit: int = 20) -> list[Incident]:
         if not 1 <= limit <= 1000:
             raise ValueError("Limit must be between 1 and 1000")

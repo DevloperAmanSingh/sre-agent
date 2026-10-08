@@ -40,6 +40,20 @@ def save(store, diagnosis, **kwargs):
     )
 
 
+def test_feedback_transitions_and_unknown_id(store, diagnosis):
+    incident_id = save(store, diagnosis)
+    for status in ("right", "wrong", "right"):
+        incident = store.set_feedback(incident_id, status, "token=private")
+        assert incident.status == status
+        assert incident.feedback_at == NOW
+        assert "private" not in incident.note
+        assert store.get(incident_id) == incident
+    with pytest.raises(ValueError, match="Unknown incident #999"):
+        store.set_feedback(999, "right")
+    with pytest.raises(ValueError, match="right or wrong"):
+        store.set_feedback(incident_id, "unconfirmed")
+
+
 def test_round_trip_schema_and_redaction(store, diagnosis, tmp_path):
     incident_id = save(store, diagnosis)
     incident = store.get(incident_id)

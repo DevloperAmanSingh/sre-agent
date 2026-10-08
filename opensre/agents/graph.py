@@ -59,6 +59,7 @@ def build_agent(
         tools=collect_tools(connectors),
         system_prompt=(Path(__file__).parent / "prompts/system.md").read_text(),
         backend=SkillsBackend(skills_root),
+        skills=["/"],
         middleware=middleware,
         permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
         response_format=ToolStrategy(Diagnosis),

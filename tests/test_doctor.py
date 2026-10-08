@@ -69,7 +69,7 @@ def test_kube_deadline(stage):
 
 
 @pytest.mark.parametrize("output", ["table", "json"])
-@pytest.mark.parametrize("failure", [None, "kube", "key"])
+@pytest.mark.parametrize("failure", [None, "kube", "key", "primary", "fallback"])
 def test_doctor_exit_and_output(output, failure, monkeypatch):
     from opensre import doctor
     from opensre.cli import main
@@ -83,7 +83,10 @@ def test_doctor_exit_and_output(output, failure, monkeypatch):
         detail="unreachable" if failure == "kube" else "v1.35.0",
     )
     monkeypatch.setattr(main, "check_kube", lambda settings: result)
-    response = CliRunner().invoke(app, ["doctor", *(["--json"] if output == "json" else [])])
+    flags = [f"--{failure}", "nonesuch/model"] if failure in ("primary", "fallback") else []
+    response = CliRunner().invoke(
+        app, [*flags, "doctor", *(["--json"] if output == "json" else [])]
+    )
     assert response.exit_code == (0 if failure is None else 1)
     if output == "json":
         data = json.loads(response.stdout)
@@ -95,6 +98,10 @@ def test_doctor_exit_and_output(output, failure, monkeypatch):
         assert result.detail in response.stdout
     if failure == "key":
         assert "OPENAI_API_KEY" in response.stdout
+    if failure in ("primary", "fallback"):
+        assert f"llm.{failure}" in response.stdout
+        assert "nonesuch/model" in response.stdout
+        assert "Provider List" not in response.stdout
 
 
 @pytest.mark.parametrize("failure", [False, True])

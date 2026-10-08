@@ -9,6 +9,8 @@ from langchain_litellm import ChatLiteLLM  # noqa: E402
 
 from opensre.config import LLMSettings  # noqa: E402
 
+litellm.suppress_debug_info = True
+
 
 class KeyValidation(TypedDict):
     keys_in_environment: bool
@@ -19,25 +21,31 @@ class LLMError(ValueError):
     pass
 
 
-def configured_models(settings: LLMSettings) -> list[str]:
-    return list(
-        dict.fromkeys([settings.primary, *([settings.fallback] if settings.fallback else [])])
-    )
+def configured_models(settings: LLMSettings) -> list[tuple[str, str]]:
+    models = [("llm.primary", settings.primary)]
+    if settings.fallback and settings.fallback != settings.primary:
+        models.append(("llm.fallback", settings.fallback))
+    return models
+
+
+def validate_model(model: str, field: str) -> None:
+    try:
+        litellm.get_llm_provider(model=model)
+    except Exception as exc:
+        raise LLMError(f"{field}: unsupported model or provider: {model}") from exc
 
 
 def validate_keys(model: str) -> None:
     result = cast(KeyValidation, litellm.validate_environment(model))  # pyright: ignore[reportUnknownMemberType]
     missing = result.get("missing_keys", [])
-    key = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}.get(model.split("/")[0])
-    if key and not os.environ.get(key, "").strip() and key not in missing:
-        missing.append(key)
     if not result.get("keys_in_environment") or missing:
         detail = ", ".join(missing) or "unsupported model or provider"
         raise LLMError(f"{model}: {detail}")
 
 
 def build_model(settings: LLMSettings) -> ChatLiteLLM:
-    for model in configured_models(settings):
+    for field, model in configured_models(settings):
+        validate_model(model, field)
         validate_keys(model)
     return ChatLiteLLM(
         model=settings.primary,

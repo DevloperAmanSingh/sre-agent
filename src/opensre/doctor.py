@@ -9,7 +9,7 @@ from pydantic import BaseModel, computed_field, field_validator
 
 from opensre.config import KubeSettings, LLMSettings
 from opensre.connectors.k8s.client import create_client
-from opensre.llm import configured_models, litellm, validate_keys
+from opensre.llm import configured_models, litellm, validate_keys, validate_model
 
 
 class CheckResult(BaseModel):
@@ -79,9 +79,10 @@ def check_llm(
 ) -> list[CheckResult]:
     complete = completion or cast(Callable[..., Any], getattr(litellm, "completion"))
     results: list[CheckResult] = []
-    for model in configured_models(settings):
+    for field, model in configured_models(settings):
         started: float | None = None
         try:
+            validate_model(model, field)
             key_validator(model)
             if live:
                 started = clock()

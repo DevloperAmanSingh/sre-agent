@@ -45,6 +45,13 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class PodLogs(BaseModel):
+    text: str
+    cut: int
+    server_cap_bytes: int
+    truncation: str
+
+
 class PodDetail(BaseModel):
     name: str
     namespace: str

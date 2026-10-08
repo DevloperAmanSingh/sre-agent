@@ -6,8 +6,9 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details
-from opensre.connectors.kubernetes.models import PodDetail, PodSummary
+from opensre.connectors.kubernetes.models import PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
+from opensre.output import cap_text
 
 Limit = Annotated[int, Field(ge=1, le=100)]
 
@@ -75,7 +76,39 @@ def read_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[B
         result = reader.read(read)
         return result.model_dump_json(), result
 
-    tools: list[BaseTool] = [k8s_list_pods, k8s_describe_pod]
+    @tool(response_format="content_and_artifact")
+    def k8s_pod_logs(
+        name: str,
+        namespace: str | None = None,
+        container: str | None = None,
+        tail_lines: Annotated[int, Field(ge=1, le=1000)] = 100,
+        previous: bool = False,
+    ) -> tuple[str, PodLogs]:
+        """Read bounded tail logs; previous=True reads the crashed container run."""
+
+        def read(api: Any) -> PodLogs:
+            kwargs: dict[str, Any] = dict(
+                name=name,
+                namespace=namespace or reader.settings.namespace,
+                tail_lines=tail_lines,
+                previous=previous,
+                limit_bytes=16000,
+                _request_timeout=reader.settings.request_timeout_s,
+            )
+            if container:
+                kwargs["container"] = container
+            text = str(core_factory(api).read_namespaced_pod_log(**kwargs) or "")
+            return PodLogs(
+                text=cap_text(text, 16000),
+                cut=max(0, len(text) - 16000),
+                server_cap_bytes=16000,
+                truncation="Tail only; API limit 16000 bytes; older omitted count unknown",
+            )
+
+        result = reader.read(read)
+        return result.model_dump_json(), result
+
+    tools: list[BaseTool] = [k8s_list_pods, k8s_describe_pod, k8s_pod_logs]
     for entry in tools:
         entry.metadata = {"read_only": True}
     return tools

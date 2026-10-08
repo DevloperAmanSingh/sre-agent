@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from fakes.kubernetes import NOW, connector, container_status, invoke, page, pod
 from kubernetes import client as k
 
@@ -78,3 +79,30 @@ def test_describe_pod_includes_termination_and_specs_without_values():
     assert result.conditions[0].status == "False"
     assert "do-not-leak" not in result.model_dump_json()
     assert "secret-command" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("previous", [False, True])
+def test_pod_logs_request_tail_and_previous_and_cap_text(previous):
+    def logs(**kwargs):
+        assert kwargs == {
+            "name": "checkout",
+            "namespace": "production",
+            "container": "app",
+            "tail_lines": 10,
+            "previous": previous,
+            "limit_bytes": 16000,
+            "_request_timeout": 3,
+        }
+        return "x" * 17000
+
+    result = invoke(
+        connector(read_namespaced_pod_log=logs),
+        "k8s_pod_logs",
+        name="checkout",
+        container="app",
+        tail_lines=10,
+        previous=previous,
+    )
+    assert result.cut == 1000
+    assert result.text.endswith("[1000 characters cut]")
+    assert len(result.text) < 16100

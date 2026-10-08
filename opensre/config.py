@@ -15,6 +15,7 @@ from pydantic_settings import (
 
 class KubeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
     context: str | None = None
     namespace: str = "default"
     request_timeout_s: float = Field(default=10, gt=0, allow_inf_nan=False)
@@ -27,11 +28,16 @@ class LLMSettings(BaseModel):
     timeout_s: float = Field(default=60, gt=0, allow_inf_nan=False)
 
 
+class ConnectorSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kubernetes: KubeSettings = Field(default_factory=KubeSettings)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="forbid", env_prefix="OPENSRE_", env_nested_delimiter="__"
     )
-    kube: KubeSettings = Field(default_factory=KubeSettings)
+    connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
 
 

@@ -69,10 +69,12 @@ and `latency_s` (null unless a live request was attempted).
 Copy `examples/opensre.yaml` to `opensre.yaml`:
 
 ```yaml
-kube:
-  context: null
-  namespace: default
-  request_timeout_s: 10
+connectors:
+  kubernetes:
+    enabled: true
+    context: null
+    namespace: default
+    request_timeout_s: 10
 llm:
   primary: deepseek/deepseek-chat
   fallback: openai/gpt-5.6-luna
@@ -86,7 +88,7 @@ Values take precedence in this order: **CLI flags → `OPENSRE_*` environment va
 → YAML → defaults**. Nested environment variables use `__`:
 
 ```bash
-export OPENSRE_KUBE__NAMESPACE=shop
+export OPENSRE_CONNECTORS__KUBERNETES__NAMESPACE=shop
 uv run opensre --context kind-demo --request-timeout 5 doctor
 uv run opensre --config ./custom.yaml --primary deepseek/deepseek-chat doctor --json
 ```

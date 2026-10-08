@@ -35,6 +35,7 @@ def main(
         section: {key: value for key, value in fields.items() if value is not None}
         for section, fields in overrides.items()
     }
+    overrides["connectors"] = {"kubernetes": overrides.pop("kube")}
     try:
         ctx.obj = load_settings(config, overrides)
     except ConfigError as exc:
@@ -49,7 +50,9 @@ def doctor(
     json_output: Annotated[bool, typer.Option("--json", help="Print a JSON report.")] = False,
 ) -> None:
     settings = cast(Settings, ctx.obj)
-    report = DoctorReport(checks=[check_kube(settings.kube), *check_llm(settings.llm, live=live)])
+    report = DoctorReport(
+        checks=[check_kube(settings.connectors.kubernetes), *check_llm(settings.llm, live=live)]
+    )
     if json_output:
         typer.echo(report.model_dump_json())
     else:

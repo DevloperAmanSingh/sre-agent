@@ -7,13 +7,14 @@ from opensre.cli.main import app
 
 
 @pytest.mark.parametrize(
-    "source,field", [("yaml", "kube.request_timeout_s"), ("env", "kube"), ("env", "llm")]
+    "source,field",
+    [("yaml", "connectors.kubernetes.request_timeout_s"), ("env", "connectors"), ("env", "llm")],
 )
 def test_invalid_config(source, field, tmp_path, monkeypatch):
     flags = []
     if source == "yaml":
         path = tmp_path / "bad.yaml"
-        path.write_text("kube: {request_timeout_s: nope}")
+        path.write_text("connectors: {kubernetes: {request_timeout_s: nope}}")
         flags = ["--config", str(path)]
     else:
         monkeypatch.setenv(f"OPENSRE_{field.upper()}", "not-json")

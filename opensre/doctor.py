@@ -9,7 +9,7 @@ from kubernetes import client  # pyright: ignore[reportMissingTypeStubs]
 from pydantic import BaseModel, computed_field, field_validator
 
 from opensre.config import KubeSettings, LLMSettings
-from opensre.connectors.k8s.client import create_client
+from opensre.connectors.kubernetes.client import create_client
 from opensre.llm import configured_models, litellm, validate_keys, validate_model
 
 

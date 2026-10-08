@@ -7,7 +7,12 @@ from kubernetes import client as k
 
 
 def run_rule(target, name):
-    return next(check for check in target.checks() if check.name == name).run()
+    findings = next(check for check in target.checks() if check.name == name).run()
+    for finding in findings:
+        for evidence in finding.evidence:
+            assert "datetime" not in evidence.detail
+            assert "=None" not in evidence.detail
+    return findings
 
 
 @pytest.mark.parametrize("init", [False, True])
@@ -52,7 +57,13 @@ def test_crashloop_detects_current_state_in_regular_and_init_containers(
     assert finding.resource == "pod/production/checkout"
     assert finding.reason == "CrashLoopBackOff"
     assert finding.evidence[0].source == "k8s_describe_pod"
-    assert "app" in finding.evidence[0].detail
+    if state == "waiting":
+        assert "Container app: waiting in CrashLoopBackOff" in finding.evidence[0].detail
+    else:
+        assert (
+            finding.evidence[0].detail
+            == f"Container app: Error exit=1 at {NOW}, 2 failed runs in the last hour"
+        )
     assert run_rule(target, "restarts") == []
 
 
@@ -198,6 +209,7 @@ def test_running_not_ready_observes_startup_grace_and_pod_readiness(
         (100, 61, "Error", 1, 0),
         (1, 5, "Completed", 0, 0),
         (1, 5, "Error", 1, 1),
+        (1, 5, "Error", None, 1),
         (0, 5, "Error", 1, 0),
     ],
 )

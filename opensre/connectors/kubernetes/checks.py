@@ -49,30 +49,51 @@ def oom_terms(container: ContainerObservation, now: datetime) -> list[Terminatio
     )
 
 
+def failed_terms(container: ContainerObservation, now: datetime) -> list[Termination]:
+    return sorted(
+        [
+            term
+            for term in terminations(container)
+            if term.exit_code and recent(term.finished_at, now)
+        ],
+        key=lambda term: term.finished_at or now,
+        reverse=True,
+    )
+
+
+def termination_detail(name: str, term: Termination) -> str:
+    exit_code = term.exit_code if term.exit_code is not None else "unknown"
+    return (
+        f"Container {name}: {term.reason or 'Unknown'} exit={exit_code} "
+        f"at {term.finished_at or 'unknown'}"
+    )
+
+
 def crashing(container: ContainerObservation, policy: str, now: datetime) -> bool:
     if oom_terms(container, now):
         return False
     if container.state_kind == "waiting" and container.state == "CrashLoopBackOff":
         return True
-    failures = {
-        term.finished_at
-        for term in terminations(container)
-        if term.exit_code and recent(term.finished_at, now)
-    }
+    failures = {term.finished_at for term in failed_terms(container, now)}
     return policy == "Always" and not container.ready and len(failures) >= 2
 
 
 def crashloop(pod: PodObservation, now: datetime) -> list[Finding]:
-    return [
-        finding(
-            pod,
-            "CrashLoopBackOff",
-            f"Container {container.name}: repeated recent failed runs or CrashLoopBackOff; "
-            f"current={container.current_termination}; previous={container.last_termination}",
-        )
-        for container in pod.containers
-        if crashing(container, pod.restart_policy, now)
-    ]
+    findings: list[Finding] = []
+    for container in pod.containers:
+        if not crashing(container, pod.restart_policy, now):
+            continue
+        if container.state_kind == "waiting" and container.state == "CrashLoopBackOff":
+            detail = f"Container {container.name}: waiting in CrashLoopBackOff"
+        else:
+            failures = failed_terms(container, now)
+            count = len({term.finished_at for term in failures})
+            detail = (
+                f"{termination_detail(container.name, failures[0])}, "
+                f"{count} failed runs in the last hour"
+            )
+        findings.append(finding(pod, "CrashLoopBackOff", detail))
+    return findings
 
 
 def image_pull(pod: PodObservation, now: datetime) -> list[Finding]:
@@ -98,8 +119,7 @@ def oom(pod: PodObservation, now: datetime) -> list[Finding]:
         result = finding(
             pod,
             "OOMKilled",
-            f"Container {container.name}: OOMKilled exit={latest.exit_code} "
-            f"at {latest.finished_at}",
+            termination_detail(container.name, latest),
         )
         for older in terms[1:]:
             if older != latest:
@@ -133,8 +153,7 @@ def restarts(pod: PodObservation, now: datetime) -> list[Finding]:
                 finding(
                     pod,
                     "RecentRestart",
-                    f"Container {container.name} restarted after {term.reason}, "
-                    f"exit={term.exit_code} at {term.finished_at}",
+                    f"{termination_detail(container.name, term)}, restarted in the last hour",
                     Severity.WARNING,
                 )
             )

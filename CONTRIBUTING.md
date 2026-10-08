@@ -17,6 +17,14 @@ Keep changes small and working. Use conventional present-tense commits such as
 `feat(connectors): add namespace reader` or `fix(cli): report invalid settings`.
 Run `make check` before each commit. Each plan step has its own branch and PR.
 
+## Harness profile ownership
+
+The pinned deepagents registry is process-global and additive, not per-agent.
+OpenSre registers `opensre:harness` once at module load and rejects conflicting
+pre-existing or inherited profiles. A model adapter owns that identity while
+provider calls, timeouts, and fallbacks remain on the settings-built LiteLLM model.
+Unrelated models keep their own profiles. Registry tests run in isolated processes.
+
 ## Add a connector
 
 Connectors plug into the shared harness contract and registry:

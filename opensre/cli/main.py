@@ -71,10 +71,10 @@ def doctor(
 @app.command()
 def tools(ctx: typer.Context) -> None:
     """List effective read-only agent tools by source, without contacting targets."""
-    from opensre.agents.lock import inspect_tools
-
     settings = cast(Settings, ctx.obj)
     try:
+        from opensre.agents.lock import inspect_tools
+
         sources = inspect_tools(collect_tools(build_connectors(settings)))
     except Exception as exc:
         typer.echo(f"Tool self-check failed: {exc}", err=True)
@@ -92,10 +92,10 @@ def ask(
     json_output: Annotated[bool, typer.Option("--json", help="Print a JSON diagnosis.")] = False,
 ) -> None:
     """Investigate a question using read-only tools and markdown skills."""
-    from opensre.agents.run import investigate
-
     settings = cast(Settings, ctx.obj)
     try:
+        from opensre.agents.run import investigate
+
         diagnosis = investigate(question, build_connectors(settings), settings.llm)
     except Exception as exc:
         typer.echo(f"Investigation failed: {cap_text(str(exc), 2000)}", err=True)

@@ -1,8 +1,36 @@
 # OpenSre
 
-A read-only command-line SRE assistant for Kubernetes. OpenSre never changes the cluster.
-The current skeleton checks cluster access and LLM credentials; rule checks and AI
-investigation are coming in later steps.
+A read-only command-line SRE harness. Connectors provide access to targets, starting
+with Kubernetes; markdown skills provide investigation playbooks. OpenSre never
+changes a target. The current skeleton checks cluster access and LLM credentials.
+
+## Architecture
+
+```text
+CLI → Harness → Connectors → Targets
+         ↑
+       Skills
+```
+
+## Where things live
+
+| Path | Purpose |
+| --- | --- |
+| `opensre/cli/` | Thin Typer commands and text rendering |
+| `opensre/config.py` | Validated YAML and environment settings |
+| `opensre/llm.py` | LiteLLM chat model and fallback |
+| `opensre/domain.py` | Shared result models (planned) |
+| `opensre/doctor.py` | Setup health checks |
+| `opensre/connectors/` | Target contracts and registry (planned) |
+| `opensre/connectors/kubernetes/` | Kubernetes client and connector |
+| `opensre/connectors/host/`, `opensre/connectors/mcp/` | Future connectors |
+| `opensre/agents/` | Locked agent, middleware and prompts (planned) |
+| `skills/` | Markdown playbooks (planned) |
+| `examples/` | Sample settings |
+| `tests/` | Offline unit tests; shared fakes go in `tests/fakes/` |
+| `testbed/` | Local integration playground (planned) |
+| `CONTRIBUTING.md` | Development and extension guide |
+| `LICENSE` | MIT license |
 
 ## Install
 

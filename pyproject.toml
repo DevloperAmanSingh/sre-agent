@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling==1.30.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opensre"
+version = "0.1.0"
+description = "Read-only Kubernetes SRE assistant"
+requires-python = ">=3.12"
+dependencies = [
+  "typer==0.27.3", "rich==15.0.0", "pydantic==2.13.5",
+  "pydantic-settings==2.15.0", "pyyaml==6.0.3", "kubernetes==37.0.0",
+  "langchain==1.4.3", "litellm==1.104.2",
+  "langchain-litellm==0.11.0", "deepagents==0.7.23",
+]
+
+[project.scripts]
+opensre = "opensre.cli.main:app"
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.10", "pyright==1.1.414"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pyright]
+include = ["src/opensre"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

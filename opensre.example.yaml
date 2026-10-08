@@ -1,0 +1,8 @@
+kube:
+  context: null
+  namespace: default
+  request_timeout_s: 10
+llm:
+  primary: deepseek/deepseek-chat
+  fallback: openai/gpt-5.6-luna
+  timeout_s: 60

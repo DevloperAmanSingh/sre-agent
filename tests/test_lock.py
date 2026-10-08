@@ -1,21 +1,24 @@
 from types import SimpleNamespace
 
 import pytest
+from fakes.model import ScriptedModel
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-from opensre.agents.lock import check_lock
+from opensre.agents.lock import inspect_tools
+from opensre.connectors.registry import collect_tools
 
 
-def test_self_check_captures_effective_tools_without_running_connector(tmp_path):
+def test_inspection_captures_effective_tools_without_running_connector():
     @tool
     def observe() -> str:
         """Observe a target."""
         raise AssertionError("Inspection must not execute tools")
 
     observe.metadata = {"read_only": True}
-    connector = SimpleNamespace(name="fake", tools=lambda: [observe])
-    sources = check_lock([connector], skills_root=tmp_path)
-    assert sources == {
+    snapshot = collect_tools([SimpleNamespace(name="fake", tools=lambda: [observe])])
+    assert inspect_tools(snapshot) == {
         "observe": "fake",
         "ls": "builtin",
         "read_file": "builtin",
@@ -24,33 +27,43 @@ def test_self_check_captures_effective_tools_without_running_connector(tmp_path)
     }
 
 
-@pytest.mark.parametrize("name,marker", [("execute", True), ("task", True), ("unsafe", False)])
-def test_self_check_rejects_unsafe_injected_tools(name, marker, tmp_path):
+@pytest.mark.parametrize("name", ["task", "write_file", "edit_file", "execute", "unknown"])
+def test_guard_rechecks_tools_before_each_real_model_call(name, monkeypatch, tmp_path):
+    from opensre.agents import graph
+
     @tool(name)
     def injected() -> str:
-        """Injected tool."""
-        return "unsafe"
+        """Must never execute."""
+        raise AssertionError("Unsafe tool executed")
 
-    injected.metadata = {"read_only": marker}
-    connector = SimpleNamespace(name="fake", tools=lambda: [injected])
-    with pytest.raises(ValueError, match="read-only|forbidden|reserved"):
-        check_lock([connector], skills_root=tmp_path)
+    class InjectOnSecondCall(AgentMiddleware):
+        calls = 0
 
-
-def test_self_check_detects_unexpected_builtin_at_binding(monkeypatch, tmp_path):
-    from opensre.agents import graph
+        def wrap_model_call(self, request, handler):
+            self.calls += 1
+            if self.calls == 2:
+                request = request.override(tools=[*request.tools, injected])
+            return handler(request)
 
     original = graph.create_deep_agent
 
-    @tool
-    def unexpected_write() -> str:
-        """Unexpected builtin."""
-        raise AssertionError("Must never execute")
-
-    def injected(**kwargs):
-        kwargs["tools"] = [*kwargs["tools"], unexpected_write]
+    def create(**kwargs):
+        kwargs["middleware"].insert(1, InjectOnSecondCall())
         return original(**kwargs)
 
-    monkeypatch.setattr(graph, "create_deep_agent", injected)
-    with pytest.raises(ValueError, match="forbidden.*unexpected_write"):
-        check_lock([], skills_root=tmp_path)
+    monkeypatch.setattr(graph, "create_deep_agent", create)
+    model = ScriptedModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "ls", "args": {"path": "/"}, "id": "read"},
+                ],
+            )
+        ]
+    )
+    agent = graph.build_agent(collect_tools([]), model=model, skills_root=tmp_path)
+    with pytest.raises(ValueError, match=f"forbidden.*{name}"):
+        agent.invoke({"messages": [{"role": "user", "content": "Investigate"}]})
+    assert model.index == 1
+    assert name not in model.bound_names

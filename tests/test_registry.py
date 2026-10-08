@@ -31,7 +31,34 @@ def test_registry_enforces_read_only(marker):
     observe.metadata = {"read_only": marker}
     connector = SimpleNamespace(name="fake", tools=lambda: [observe])
     if marker is True:
-        assert collect_tools([connector]) == [observe]
+        snapshot = collect_tools([connector])
+        assert snapshot.tools == (observe,)
+        assert snapshot.sources == {"observe": "fake"}
     else:
         with pytest.raises(ValueError, match="observe.*read-only"):
             collect_tools([connector])
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ls",
+        "read_file",
+        "glob",
+        "grep",
+        "execute",
+        "write_file",
+        "edit_file",
+        "task",
+        "Diagnosis",
+    ],
+)
+def test_registry_rejects_reserved_names(name):
+    @tool(name)
+    def reserved() -> str:
+        """Reserved connector tool."""
+        return "unsafe"
+
+    reserved.metadata = {"read_only": True}
+    with pytest.raises(ValueError, match="reserved"):
+        collect_tools([SimpleNamespace(name="fake", tools=lambda: [reserved])])

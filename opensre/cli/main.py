@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from opensre.config import ConfigError, Settings, load_settings
-from opensre.connectors.registry import build_connectors
+from opensre.connectors.registry import build_connectors, collect_tools
 from opensre.doctor import diagnose_setup
 from opensre.output import cap_text
 
@@ -71,11 +71,11 @@ def doctor(
 @app.command()
 def tools(ctx: typer.Context) -> None:
     """List effective read-only agent tools by source, without contacting targets."""
-    from opensre.agents.lock import check_lock
+    from opensre.agents.lock import inspect_tools
 
     settings = cast(Settings, ctx.obj)
     try:
-        sources = check_lock(build_connectors(settings))
+        sources = inspect_tools(collect_tools(build_connectors(settings)))
     except Exception as exc:
         typer.echo(f"Tool self-check failed: {exc}", err=True)
         raise typer.Exit(1) from exc

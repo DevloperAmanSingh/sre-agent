@@ -3,6 +3,7 @@ from fakes.model import ScriptedModel
 from langchain_core.messages import AIMessage
 
 from opensre.agents.graph import SKILLS_ROOT, build_agent
+from opensre.connectors.registry import collect_tools
 from opensre.domain import Diagnosis
 
 
@@ -28,7 +29,7 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis():
             )
         ]
     )
-    agent = build_agent([], model=model, skills_root=SKILLS_ROOT)
+    agent = build_agent(collect_tools([]), model=model, skills_root=SKILLS_ROOT)
     result = agent.invoke({"messages": [{"role": "user", "content": "Investigate"}]})
     assert result["structured_response"] == Diagnosis(**diagnosis)
     assert "triage" in model.seen[0][0].text
@@ -41,7 +42,7 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis():
 def test_agent_stops_runaway_calls(tmp_path, tools_per_call):
     calls = [{"name": "ls", "args": {"path": "/"}, "id": str(i)} for i in range(tools_per_call)]
     model = ScriptedModel(responses=[AIMessage(content="", tool_calls=calls)])
-    agent = build_agent([], model=model, skills_root=tmp_path)
+    agent = build_agent(collect_tools([]), model=model, skills_root=tmp_path)
     with pytest.raises(Exception, match="limit"):
         agent.invoke(
             {"messages": [{"role": "user", "content": "Investigate"}]},

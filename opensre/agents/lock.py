@@ -1,5 +1,4 @@
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
@@ -13,12 +12,30 @@ from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
-from opensre.agents.graph import SKILLS_ROOT, build_agent
-from opensre.connectors.base import Connector
-from opensre.connectors.registry import collect_tools
+from opensre.connectors.registry import READ_TOOLS, ToolSnapshot
 
-READ_TOOLS = frozenset({"ls", "read_file", "glob", "grep"})
-FORBIDDEN = frozenset({"execute", "write_file", "edit_file", "task"})
+
+class ToolGuardMiddleware(AgentMiddleware):
+    def __init__(self, snapshot: ToolSnapshot) -> None:
+        self.allowed = READ_TOOLS | set(snapshot.sources)
+
+    def _check(self, request: ModelRequest) -> None:
+        names = {convert_to_openai_tool(tool)["function"]["name"] for tool in request.tools}
+        unsafe = names - self.allowed
+        if unsafe:
+            raise ValueError(f"Read-only guard found forbidden or unknown tools: {sorted(unsafe)}")
+
+    def wrap_model_call(
+        self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
+    ) -> ModelResponse:
+        self._check(request)
+        return handler(request)
+
+    async def awrap_model_call(
+        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+    ) -> ModelResponse:
+        self._check(request)
+        return await handler(request)
 
 
 class _Captured(Exception):
@@ -52,31 +69,11 @@ class InspectionModel(BaseChatModel):
         raise _Captured
 
 
-class _Inspect(AgentMiddleware):
-    def __init__(self, model: InspectionModel) -> None:
-        self.model = model
+def inspect_tools(snapshot: ToolSnapshot) -> dict[str, str]:
+    from opensre.agents.graph import build_agent
 
-    def wrap_model_call(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
-    ) -> ModelResponse:
-        return handler(request.override(model=self.model))
-
-
-def check_lock(
-    connectors: Sequence[Connector],
-    *,
-    model: BaseChatModel | None = None,
-    skills_root: Path = SKILLS_ROOT,
-) -> dict[str, str]:
-    tools = collect_tools(connectors)
-    reserved = READ_TOOLS | FORBIDDEN | {"Diagnosis"}
-    for tool in tools:
-        if tool.name in reserved:
-            raise ValueError(f"Connector tool {tool.name} uses a reserved name")
     probe = InspectionModel()
-    agent = build_agent(
-        connectors, model=model or probe, skills_root=skills_root, inspection=_Inspect(probe)
-    )
+    agent = build_agent(snapshot, model=probe)
     try:
         agent.invoke(  # pyright: ignore[reportUnknownMemberType]
             {"messages": [{"role": "user", "content": "Inspect tool bindings only."}]}
@@ -85,9 +82,6 @@ def check_lock(
         pass
     if not probe.names:
         raise ValueError("Read-only self-check did not capture model tools")
-    sources = {tool.name: connector.name for connector in connectors for tool in connector.tools()}
-    allowed = READ_TOOLS | set(sources) | {"Diagnosis"}
-    unsafe = set(probe.names) - allowed
-    if unsafe or FORBIDDEN.intersection(probe.names):
-        raise ValueError(f"Read-only self-check found forbidden tools: {sorted(unsafe)}")
-    return {name: sources.get(name, "builtin") for name in probe.names if name != "Diagnosis"}
+    return {
+        name: snapshot.sources.get(name, "builtin") for name in probe.names if name != "Diagnosis"
+    }

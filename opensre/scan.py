@@ -25,7 +25,10 @@ def run_checks(connectors: Sequence[Connector]) -> ScanReport:
         try:
             for check in connector.checks():
                 name = f"{connector.name}/{check.name}"
-                report.findings.extend(check.run())
+                report.findings.extend(
+                    finding.model_copy(update={"connector": connector.name})
+                    for finding in check.run()
+                )
                 report.findings.sort(
                     key=lambda finding: (order[finding.severity], finding.resource, finding.reason)
                 )

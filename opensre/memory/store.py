@@ -13,6 +13,10 @@ from opensre.output import cap_text
 from opensre.redaction import redact
 
 
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def clean(text: str, limit: int = 2000) -> str:
     return cap_text(redact(text) or "", limit - 40)
 
@@ -48,11 +52,9 @@ def decode(row: sqlite3.Row) -> Incident:
 
 
 class IncidentStore:
-    def __init__(
-        self, directory: Path, *, now: Callable[[], datetime] = lambda: datetime.now(UTC)
-    ) -> None:
+    def __init__(self, directory: Path, *, now: Callable[[], datetime] | None = None) -> None:
         self.path = directory / "memory.db"
-        self.now = now
+        self.now = now or utc_now
         directory.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]

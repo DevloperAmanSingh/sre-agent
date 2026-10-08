@@ -60,7 +60,7 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     if json_output:
-        assert json.loads(result.stdout) == diagnosis
+        assert json.loads(result.stdout) == {**diagnosis, "incident_id": None}
     else:
         for text in [
             diagnosis["summary"],
@@ -162,7 +162,7 @@ def test_ask_returns_after_credential_deadline(deadline, monkeypatch):
     monkeypatch.setattr(main, "build_connectors", lambda settings: [connector])
     result = CliRunner().invoke(app, ["ask", "Investigate", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == diagnosis
+    assert json.loads(result.stdout) == {**diagnosis, "incident_id": None}
     error = next(message for message in model.seen[-1] if isinstance(message, ToolMessage))
     assert error.status == "error"
     assert "timed out after 3s" in error.content

@@ -30,6 +30,7 @@ class Evidence(BaseModel):
 
 
 class Finding(BaseModel):
+    connector: str = ""
     resource: str
     reason: str
     summary: str
@@ -48,3 +49,7 @@ class Diagnosis(BaseModel):
     evidence: list[Evidence]
     suggested_fix: str
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
+
+
+class Investigation(Diagnosis):
+    incident_id: int | None = None

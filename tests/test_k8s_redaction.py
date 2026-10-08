@@ -10,6 +10,7 @@ from kubernetes import client as k
         "password: synthetic-secret",
         '"api_key": "synthetic-secret"',
         "TOKEN='synthetic-secret'",
+        'TOKEN="synthetic-secret\\"synthetic-secret"',
         "Bearer synthetic-secret",
         "https://user:synthetic-secret@example.test/path",
         "auth=synthetic-secret",

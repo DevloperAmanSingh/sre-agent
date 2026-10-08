@@ -32,6 +32,8 @@ flowchart LR
 
     H -->|tools| C
     H -->|playbooks| S[Skills<br/>skills/*/SKILL.md]
+    MEM[(Memory<br/>environment facts<br/>+ past incidents<br/>planned)] -->|recall| H
+    H -->|save after run| MEM
 
     subgraph C[Connectors]
         K[Kubernetes]
@@ -44,12 +46,14 @@ flowchart LR
     P --> T3[(Metrics and logs)]
 
     H --> D[Diagnosis<br/>cause · evidence · fix · confidence]
+    D -.->|opensre feedback| MEM
 ```
 
 1. **Connectors** are plug-ins, one per kind of target. Each provides a health check (used by `doctor`), read-only tools for the agent, and quick rule checks (used by `scan`, planned).
 2. **Skills** are markdown playbooks, such as "how to investigate a crash loop". The agent reads the relevant one while investigating.
 3. **The agent** plans, calls connector tools, reads skills, and returns a typed `Diagnosis`.
-4. **The lock** keeps the agent read-only:
+4. **Memory** (planned) gives the agent context it would otherwise lack: facts about your environment, and similar past incidents with their confirmed causes. OpenSre saves each investigation after it finishes; your feedback marks it right or wrong. The agent itself never writes memory.
+5. **The lock** keeps the agent read-only:
    - Writes are denied, and the write, edit and execute tools are removed.
    - Before every run, OpenSre checks the exact tools the model receives and refuses to start if any could change something.
    - Each run has hard limits on model calls, tool calls and tool output size.

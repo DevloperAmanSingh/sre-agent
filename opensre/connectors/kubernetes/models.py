@@ -45,6 +45,22 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class ServicePort(BaseModel):
+    name: str | None
+    port: int
+    target_port: int | str | None
+    protocol: str | None
+
+
+class ServiceSummary(BaseModel):
+    name: str
+    type: str | None
+    ports: list[ServicePort]
+    ports_cut: int
+    selector: dict[str, str]
+    ready_endpoints: int
+
+
 class DeploymentSummary(BaseModel):
     name: str
     desired: int

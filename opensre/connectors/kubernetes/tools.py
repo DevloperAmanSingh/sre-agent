@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
+from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 from opensre.connectors.kubernetes.workloads import workload_tools
@@ -154,6 +155,7 @@ def read_tools(
         k8s_pod_logs,
         k8s_list_events,
         *workload_tools(reader, apps_factory),
+        *infrastructure_tools(reader, core_factory),
     ]
     for entry in tools:
         entry.metadata = {"read_only": True}

@@ -201,3 +201,34 @@ def test_describe_deployment_shows_strategy_conditions_and_only_env_secret_names
     assert result.containers[0].secret_names == ["credentials", "environment"]
     assert result.conditions[0].reason == "MinimumReplicasUnavailable"
     assert "secret-value" not in result.model_dump_json()
+
+
+def test_list_services_counts_ready_endpoints_and_reports_ports():
+    service = k.V1Service(
+        metadata=k.V1ObjectMeta(name="checkout"),
+        spec=k.V1ServiceSpec(
+            type="ClusterIP",
+            selector={"app": "checkout"},
+            ports=[k.V1ServicePort(port=80, target_port=8080)],
+        ),
+    )
+    endpoints = k.V1Endpoints(
+        subsets=[
+            k.V1EndpointSubset(
+                addresses=[k.V1EndpointAddress(ip="10.0.0.1")],
+                not_ready_addresses=[k.V1EndpointAddress(ip="10.0.0.2")],
+            )
+        ]
+    )
+    result = invoke(
+        connector(
+            list_namespaced_service=lambda **kwargs: page([service]),
+            read_namespaced_endpoints=lambda **kwargs: endpoints,
+        ),
+        "k8s_list_services",
+    )
+    row = result.items[0]
+    assert row.ready_endpoints == 1
+    assert row.selector == {"app": "checkout"}
+    assert row.ports[0].port == 80
+    assert row.ports[0].target_port == 8080

@@ -92,3 +92,29 @@ def test_pending_includes_current_scheduling_event_reason(uid, minutes, expected
     if expected == "FailedScheduling":
         assert "insufficient memory" in finding.evidence[0].detail
         assert finding.evidence[0].source == "k8s_list_events"
+
+
+@pytest.mark.parametrize(
+    "minutes,ready,phase,condition,expected",
+    [
+        (5, False, "Running", None, 0),
+        (10, False, "Running", None, 0),
+        (11, False, "Running", None, 1),
+        (11, True, "Running", None, 0),
+        (11, True, "Running", "False", 1),
+        (11, False, "Succeeded", None, 0),
+    ],
+)
+def test_running_not_ready_observes_startup_grace_and_pod_readiness(
+    minutes, ready, phase, condition, expected
+):
+    obj = pod(
+        [container_status(ready=ready)], phase=phase, created=NOW - timedelta(minutes=minutes)
+    )
+    if condition:
+        obj.status.conditions = [NS(type="Ready", status=condition)]
+    findings = run_rule(connector(list_namespaced_pod=lambda **kwargs: page([obj])), "not-ready")
+    assert len(findings) == expected
+    if expected:
+        assert findings[0].severity == "warning"
+        assert findings[0].reason == "NotReady"

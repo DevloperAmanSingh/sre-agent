@@ -69,6 +69,34 @@ def oom(pod: Any, now: datetime) -> list[Finding]:
     ]
 
 
+def not_ready(pod: Any, now: datetime) -> list[Finding]:
+    created = pod.metadata.creation_timestamp
+    if pod.status.phase != "Running" or created is None or (now - created).total_seconds() <= 600:
+        return []
+    regular = as_list(pod.status.container_statuses)
+    ready_condition = next(
+        (condition for condition in as_list(pod.status.conditions) if condition.type == "Ready"),
+        None,
+    )
+    ready = (
+        ready_condition.status == "True"
+        if ready_condition
+        else bool(regular) and all(status.ready for status in regular)
+    )
+    return (
+        []
+        if ready
+        else [
+            finding(
+                pod,
+                "NotReady",
+                "Running pod is not ready past the 10-minute startup grace",
+                Severity.WARNING,
+            )
+        ]
+    )
+
+
 def pod_events(pod: Any, events: list[Any], now: datetime) -> list[Any]:
     return [
         event
@@ -179,5 +207,6 @@ def quick_checks(
         check("crashloop", crashloop),
         check("oom", oom),
         check("image-pull", image_pull),
+        check("not-ready", not_ready),
         QuickCheck(name="pending", run=run_pending),
     ]

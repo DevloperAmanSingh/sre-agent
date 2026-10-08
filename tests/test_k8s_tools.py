@@ -98,28 +98,71 @@ def test_describe_pod_includes_termination_and_specs_without_values(current, pre
     assert "secret-command" not in result.model_dump_json()
 
 
-def test_container_field_caps_report_omitted_env_and_secret_names():
+@pytest.mark.parametrize("long_names", [False, True])
+def test_container_field_caps_report_omitted_env_and_secret_names(long_names):
     spec = k.V1Container(
         name="app",
         image="app:1",
-        env=[k.V1EnvVar(name=f"ENV_{index}", value="hidden") for index in range(60)],
+        env=[
+            k.V1EnvVar(name=f"ENV_{index}" + ("x" * 4000 if long_names else ""), value="hidden")
+            for index in range(60)
+        ],
+        resources=k.V1ResourceRequirements(limits={"memory": "128Mi"}),
         env_from=[
-            k.V1EnvFromSource(secret_ref=k.V1SecretEnvSource(name=f"secret-{index}"))
+            k.V1EnvFromSource(
+                secret_ref=k.V1SecretEnvSource(
+                    name=f"secret-{index}" + ("x" * 4000 if long_names else "")
+                )
+            )
             for index in range(55)
         ],
     )
     obj = k.V1Pod(
         metadata=k.V1ObjectMeta(name="checkout", namespace="production"),
-        spec=k.V1PodSpec(containers=[spec]),
-        status=k.V1PodStatus(),
+        spec=k.V1PodSpec(containers=[spec, k.V1Container(name="sidecar", image="sidecar:1")]),
+        status=k.V1PodStatus(
+            container_statuses=[
+                k.V1ContainerStatus(
+                    name="app",
+                    image="app:1",
+                    image_id="id",
+                    ready=False,
+                    restart_count=2,
+                    state=k.V1ContainerState(
+                        terminated=k.V1ContainerStateTerminated(
+                            reason="Error", exit_code=1, finished_at=NOW
+                        )
+                    ),
+                )
+            ]
+        ),
     )
     result = invoke(
         connector(read_namespaced_pod=lambda **kwargs: obj), "k8s_describe_pod", name="checkout"
     )
     row = result.containers[0]
-    assert len(row.env_names) == 50
-    assert row.cut == {"env_names": 10, "secret_names": 5}
+    assert row.limits == {"memory": "128Mi"}
+    assert row.current_termination.exit_code == 1
+    assert row.current_termination.finished_at == NOW
+    assert len(result.containers) == 2
+    assert row.image == "app:1"
+    assert row.name == "app"
+    assert row.cut == {
+        "env_names": 60 - len(row.env_names),
+        "secret_names": 55 - len(row.secret_names),
+    }
+    assert len(result.model_dump_json()) <= 20000
+    if not long_names:
+        assert len(row.env_names) == 50
     assert "hidden" not in result.model_dump_json()
+    narrow = invoke(
+        connector(read_namespaced_pod=lambda **kwargs: obj),
+        "k8s_describe_pod",
+        name="checkout",
+        container="app",
+    )
+    assert len(narrow.containers) == 1
+    assert narrow.containers[0].name == "app"
 
 
 @pytest.mark.parametrize("previous", [False, True])

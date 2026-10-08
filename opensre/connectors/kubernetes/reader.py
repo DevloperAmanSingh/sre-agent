@@ -1,15 +1,14 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from kubernetes.client.exceptions import ApiException  # pyright: ignore[reportMissingTypeStubs]
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from urllib3.exceptions import TimeoutError as HTTPTimeoutError
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
-from opensre.output import cap_text
 
 
 class ReadError(BaseModel):
@@ -24,50 +23,12 @@ class KubeReadError(ToolException):
 
 
 class BoundedResult(BaseModel):
-    output_cut: int = Field(
-        default=0, description="Additional collection entries omitted for output size"
-    )
+    def render(self) -> str:
+        return self.model_dump_json()
 
 
 def bounded_response[T: BoundedResult](result: T) -> tuple[str, T]:
-    collections: list[list[Any] | dict[Any, Any]] = []
-
-    def visit(value: Any) -> None:
-        if isinstance(value, BaseModel):
-            for name in type(value).model_fields:
-                item = getattr(value, name)
-                if isinstance(item, str) and name != "text":
-                    setattr(value, name, cap_text(item, 2000))
-                else:
-                    visit(item)
-        elif isinstance(value, (list, dict)):
-            collection = cast(list[Any] | dict[Any, Any], value)
-            collections.append(collection)
-            for item in collection.values() if isinstance(collection, dict) else collection:
-                visit(item)
-
-    visit(result)
-    page: Page[Any] | None = cast(Page[Any], result) if isinstance(result, Page) else None
-    original_items = len(page.items) if page is not None else 0
-    while len(result.model_dump_json()) > 19000:
-        candidates = [collection for collection in collections if collection]
-        if not candidates:
-            raise ValueError("Kubernetes result cannot fit the output budget")
-        collection = max(candidates, key=lambda item: len(str(item)))
-        if isinstance(collection, dict):
-            collection.pop(next(reversed(collection)))
-        else:
-            collection.pop()
-        result.output_cut += 1
-    if page is not None and original_items != len(page.items):
-        removed = original_items - len(page.items)
-        if page.cut is not None:
-            page.cut += removed
-            page.truncation = f"showing {len(page.items)} of {len(page.items) + page.cut}"
-        else:
-            page.truncation = f"showing {len(page.items)}; more available"
-        page.more_available |= removed > 0
-    return result.model_dump_json(), cast(T, result)
+    return result.render(), result
 
 
 class Page[T](BoundedResult):
@@ -75,6 +36,19 @@ class Page[T](BoundedResult):
     cut: int | None
     more_available: bool
     truncation: str
+
+    def render(self) -> str:
+        content = self.model_dump_json()
+        while self.items and len(content) > 20000:
+            self.items.pop()
+            if self.cut is not None:
+                self.cut += 1
+                self.truncation = f"showing {len(self.items)} of {len(self.items) + self.cut}"
+            else:
+                self.truncation = f"showing {len(self.items)}; more available"
+            self.more_available = True
+            content = self.model_dump_json()
+        return content
 
 
 def bounded_page[T](page: Any, limit: int, convert: Callable[[Any], T]) -> Page[T]:

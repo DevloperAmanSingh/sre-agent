@@ -58,8 +58,10 @@ def read_tools(
         return reader.read_result(read)
 
     @tool(response_format="content_and_artifact")
-    def k8s_describe_pod(name: str, namespace: str | None = None) -> tuple[str, PodDetail]:
-        """Read container state, last termination, images, resources and probes; no env values."""
+    def k8s_describe_pod(
+        name: str, namespace: str | None = None, container: str | None = None
+    ) -> tuple[str, PodDetail]:
+        """Read container state and specs; container narrows the result; env values are omitted."""
 
         def read(api: Any) -> PodDetail:
             pod = core_factory(api).read_namespaced_pod(
@@ -68,6 +70,10 @@ def read_tools(
                 _request_timeout=reader.settings.request_timeout_s,
             )
             specs: list[Any] = as_list(pod.spec.init_containers) + as_list(pod.spec.containers)
+            if container is not None:
+                specs = [spec for spec in specs if spec.name == container]
+                if not specs:
+                    raise ValueError("Container not found in pod")
             statuses: list[Any] = as_list(pod.status.init_container_statuses) + as_list(
                 pod.status.container_statuses
             )
@@ -147,7 +153,7 @@ def read_tools(
                 lambda event: EventSummary(
                     type=event.type,
                     reason=redact(event.reason),
-                    message=redact(event.message),
+                    message=cap_text(redact(event.message) or "", 2000),
                     object=f"{event.involved_object.kind}/{event.involved_object.name}",
                     count=event.count or 1,
                     last_seen=event_time(event),

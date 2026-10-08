@@ -4,10 +4,16 @@ from typing import Annotated, Any
 from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
-from opensre.connectors.kubernetes.details import as_list, conditions, container_details
+from opensre.connectors.kubernetes.details import (
+    as_list,
+    bounded_names,
+    conditions,
+    container_details,
+)
 from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 from opensre.connectors.kubernetes.redaction import redact
+from opensre.output import cap_text
 
 
 def label_selector(selector: Any) -> str:
@@ -54,9 +60,9 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
 
     @tool(response_format="content_and_artifact")
     def k8s_describe_deployment(
-        name: str, namespace: str | None = None
+        name: str, namespace: str | None = None, container: str | None = None
     ) -> tuple[str, DeploymentDetail]:
-        """Read deployment images, env names, resources, probes, strategy and conditions."""
+        """Read deployment specs and conditions; container narrows the result; no env values."""
 
         def read(api: Any) -> DeploymentDetail:
             deployment = apps_factory(api).read_namespaced_deployment(
@@ -67,6 +73,10 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
             specs = as_list(deployment.spec.template.spec.init_containers) + as_list(
                 deployment.spec.template.spec.containers
             )
+            if container is not None:
+                specs = [spec for spec in specs if spec.name == container]
+                if not specs:
+                    raise ValueError("Container not found in deployment")
             return DeploymentDetail(
                 name=deployment.metadata.name,
                 namespace=deployment.metadata.namespace,
@@ -105,11 +115,14 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
                 annotations: dict[str, str] = replica.metadata.annotations or {}
                 value = annotations.get("deployment.kubernetes.io/revision", "")
                 specs = as_list(replica.spec.template.spec.containers)
+                images, images_cut = bounded_names([spec.image for spec in specs])
                 return Revision(
                     revision=int(value) if value.isdigit() else None,
-                    change_cause=redact(annotations.get("kubernetes.io/change-cause")),
-                    images=[spec.image for spec in specs[:50]],
-                    images_cut=max(0, len(specs) - 50),
+                    change_cause=cap_text(
+                        redact(annotations.get("kubernetes.io/change-cause")) or "", 2000
+                    ),
+                    images=images,
+                    images_cut=images_cut,
                 )
 
             result = bounded_page(page, limit, revision)

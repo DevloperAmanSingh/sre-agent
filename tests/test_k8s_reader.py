@@ -103,6 +103,6 @@ def test_large_typed_results_are_bounded_in_content_and_artifact():
     assert len(content) <= 20000
     assert content == artifact.model_dump_json()
     assert artifact.cut == 300 - len(artifact.items)
-    assert artifact.output_cut > 0
+    assert artifact.cut > 200
     assert artifact.truncation == f"showing {len(artifact.items)} of 300"
-    assert "characters cut" in artifact.items[0].name
+    assert artifact.items[0].name == "x" * 4000

@@ -10,6 +10,19 @@ from opensre.connectors.kubernetes.models import (
     Termination,
 )
 from opensre.connectors.kubernetes.redaction import redact
+from opensre.output import cap_text
+
+
+def bounded_names(values: list[str]) -> tuple[list[str], int]:
+    names: list[str] = []
+    size = 0
+    for value in values[:50]:
+        name = cap_text(value, 128)
+        size += len(name) + 3
+        if size > 1024:
+            break
+        names.append(name)
+    return names, len(values) - len(names)
 
 
 def event_time(event: Any) -> datetime | None:
@@ -31,7 +44,7 @@ def conditions(items: list[Any] | None) -> list[Condition]:
             type=item.type,
             status=item.status,
             reason=redact(item.reason),
-            message=redact(getattr(item, "message", None)),
+            message=cap_text(redact(getattr(item, "message", None)) or "", 512),
         )
         for item in (items or [])[:50]
     ]
@@ -124,13 +137,15 @@ def container_details(spec: Any, status: Any = None) -> Container:
         if source.secret_ref:
             secrets.append(source.secret_ref.name)
     observation = container_observation(status, spec.name)
+    env_names, env_cut = bounded_names([variable.name for variable in env])
+    secret_names, secret_cut = bounded_names(secrets)
     return Container(
         **observation.model_dump(),
         image=spec.image,
-        env_names=[item.name for item in env[:50]],
-        secret_names=secrets[:50],
+        env_names=env_names,
+        secret_names=secret_names,
         requests=(resources.requests or {}) if resources else {},
         limits=(resources.limits or {}) if resources else {},
         probes=probes,
-        cut={"env_names": max(0, len(env) - 50), "secret_names": max(0, len(secrets) - 50)},
+        cut={"env_names": env_cut, "secret_names": secret_cut},
     )

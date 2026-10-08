@@ -118,3 +118,36 @@ def test_running_not_ready_observes_startup_grace_and_pod_readiness(
     if expected:
         assert findings[0].severity == "warning"
         assert findings[0].reason == "NotReady"
+
+
+@pytest.mark.parametrize(
+    "count,minutes,reason,exit_code,expected",
+    [
+        (100, None, None, 0, 0),
+        (100, 61, "Error", 1, 0),
+        (1, 5, "Completed", 0, 0),
+        (1, 5, "Error", 1, 1),
+        (0, 5, "Error", 1, 0),
+    ],
+)
+def test_restart_warning_requires_recent_failed_termination_not_lifetime_count(
+    count, minutes, reason, exit_code, expected
+):
+    term = (
+        NS(reason=reason, exit_code=exit_code, finished_at=NOW - timedelta(minutes=minutes))
+        if minutes is not None
+        else None
+    )
+    findings = run_rule(
+        connector(
+            list_namespaced_pod=lambda **kwargs: page(
+                [pod([container_status(term=term, restarts=count)])]
+            )
+        ),
+        "restarts",
+    )
+    assert len(findings) == expected
+    if expected:
+        assert findings[0].severity == "warning"
+        assert findings[0].reason == "RecentRestart"
+        assert "Error" in findings[0].evidence[0].detail

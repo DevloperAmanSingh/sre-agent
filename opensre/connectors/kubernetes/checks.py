@@ -69,6 +69,31 @@ def oom(pod: Any, now: datetime) -> list[Finding]:
     ]
 
 
+def restarts(pod: Any, now: datetime) -> list[Finding]:
+    findings: list[Finding] = []
+    for status in statuses(pod):
+        term = termination(status.last_state)
+        if not status.restart_count or not term or not recent(term.finished_at, now):
+            continue
+        failed = term.reason in {
+            "OOMKilled",
+            "Error",
+            "ContainerCannotRun",
+            "DeadlineExceeded",
+        } or bool(term.exit_code)
+        if failed:
+            findings.append(
+                finding(
+                    pod,
+                    "RecentRestart",
+                    f"Container {status.name} restarted after {term.reason}, "
+                    f"exit={term.exit_code} at {term.finished_at}",
+                    Severity.WARNING,
+                )
+            )
+    return findings
+
+
 def not_ready(pod: Any, now: datetime) -> list[Finding]:
     created = pod.metadata.creation_timestamp
     if pod.status.phase != "Running" or created is None or (now - created).total_seconds() <= 600:
@@ -208,5 +233,6 @@ def quick_checks(
         check("oom", oom),
         check("image-pull", image_pull),
         check("not-ready", not_ready),
+        check("restarts", restarts),
         QuickCheck(name="pending", run=run_pending),
     ]

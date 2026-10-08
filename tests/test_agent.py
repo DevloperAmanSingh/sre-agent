@@ -1,6 +1,6 @@
 import pytest
 from fakes.model import ScriptedModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from opensre.agents.graph import SKILLS_ROOT, build_agent
 from opensre.connectors.registry import collect_tools
@@ -21,12 +21,22 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis(tmp_path):
                 content="",
                 tool_calls=[
                     {
+                        "name": "write_file",
+                        "args": {"file_path": "/memory/environment.md", "content": "Changed"},
+                        "id": "write",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
                         "name": "Diagnosis",
                         "args": diagnosis,
                         "id": "answer",
                     }
                 ],
-            )
+            ),
         ]
     )
     from opensre.config import MemorySettings
@@ -41,6 +51,10 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis(tmp_path):
     )
     result = agent.invoke({"messages": [{"role": "user", "content": "Investigate"}]})
     assert result["structured_response"] == Diagnosis(**diagnosis)
+    assert (tmp_path / "memory/environment.md").read_text() == "- payments runs in ns shop\n"
+    assert any(
+        isinstance(message, ToolMessage) and message.status == "error" for message in model.seen[-1]
+    )
     assert "payments runs in ns shop" in model.seen[0][0].text
     assert "triage" in model.seen[0][0].text
     assert "/triage/SKILL.md" in model.seen[0][0].text

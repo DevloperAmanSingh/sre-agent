@@ -79,6 +79,11 @@ def test_recall_filters_ranking_age_and_limit(store, diagnosis):
     assert recalled[2].label == "similar past incidents"
     assert recalled[2].age == "12 days ago"
     assert len(store.similar('["kubernetes/prod"]', exact, limit=1)) == 1
+    assert [item.incident.id for item in store.similar('["kubernetes/prod"]', other_resource)] == [
+        ids[3],
+        ids[1],
+        ids[4],
+    ]
     assert store.similar('["kubernetes/prod"]', []) == []
 
 
@@ -90,8 +95,28 @@ def test_prune_by_injected_time(store, diagnosis):
     assert store.prune(timedelta(days=90)) == 1
     assert store.get(old) is None
     assert store.get(boundary) is not None
+    assert store.prune(timedelta(days=1)) == 1
+    assert save(store, diagnosis) > boundary
     with pytest.raises(ValueError):
         store.prune(timedelta(days=-1))
+
+
+@pytest.mark.parametrize("target", ["token=private", "x" * 3000], ids=["secret", "too-long"])
+def test_target_redaction_cannot_merge_identities(store, diagnosis, target):
+    with pytest.raises(ValueError, match="target"):
+        save(store, diagnosis, target=target)
+    assert store.list_recent() == []
+
+
+def test_future_schema_is_not_overwritten(tmp_path):
+    from opensre.memory.store import IncidentStore
+
+    with sqlite3.connect(tmp_path / "memory.db") as db:
+        db.execute("PRAGMA user_version = 2")
+    with pytest.raises(ValueError, match="schema version"):
+        IncidentStore(tmp_path, now=lambda: NOW)
+    with sqlite3.connect(tmp_path / "memory.db") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_round_trip_schema_and_redaction(store, diagnosis, tmp_path):

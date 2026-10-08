@@ -62,7 +62,8 @@ class IncidentStore:
                 raise ValueError(f"Unsupported memory schema version: {version}")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS incidents (
-                id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, target TEXT NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
+                target TEXT NOT NULL,
                 question TEXT NOT NULL, signature TEXT NOT NULL, summary TEXT NOT NULL,
                 cause TEXT NOT NULL, suggested_fix TEXT NOT NULL, evidence TEXT NOT NULL,
                 confidence REAL NOT NULL, status TEXT NOT NULL DEFAULT 'unconfirmed'
@@ -84,6 +85,8 @@ class IncidentStore:
     def save(
         self, *, target: str, question: str, signature: Sequence[Signature], diagnosis: Diagnosis
     ) -> int:
+        if clean(target) != target:
+            raise ValueError("Memory target identity cannot be safely stored unchanged")
         symptoms = [
             Signature(**{key: clean(value) for key, value in item.model_dump().items()})
             for item in signature[:50]

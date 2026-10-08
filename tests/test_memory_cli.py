@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 
 import pytest
 from test_memory_store import NOW
@@ -50,14 +51,15 @@ def test_feedback_unknown_id(seeded_store):
     assert "Unknown incident #999" in result.stderr
 
 
-def test_memory_list_and_prune(seeded_store):
+def test_memory_list_and_prune(seeded_store, monkeypatch):
     result = CliRunner().invoke(app, ["memory", "list", "--limit", "1", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)[0]["id"] == 1
+    monkeypatch.setattr("opensre.memory.store.utc_now", lambda: NOW + timedelta(days=91))
     result = CliRunner().invoke(app, ["memory", "prune", "--older-than", "90d"])
     assert result.exit_code == 0, result.output
-    assert "Pruned 0" in result.stdout
-    assert len(seeded_store.list_recent()) == 1
+    assert "Pruned 1" in result.stdout
+    assert seeded_store.list_recent() == []
 
 
 @pytest.mark.parametrize(

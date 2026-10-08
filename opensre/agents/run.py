@@ -46,7 +46,19 @@ def investigate(
             if recalled:
                 entries = [
                     f"{item.label} (#{item.incident.id}, {item.age}):\n"
-                    + clean(item.incident.model_dump_json(), 3500)
+                    + cap_text(
+                        json.dumps(
+                            {
+                                "summary": clean(item.incident.summary, 500),
+                                "cause": clean(item.incident.cause, 700),
+                                "suggested_fix": clean(item.incident.suggested_fix, 700),
+                                "note": clean(item.incident.note, 700),
+                                "confidence": item.incident.confidence,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        3200,
+                    )
                     for item in recalled
                 ]
                 question += "\n\nPast incidents (from memory, may be outdated):\n" + "\n".join(

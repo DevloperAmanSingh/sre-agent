@@ -1,3 +1,5 @@
+import sqlite3
+from contextlib import closing
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -5,11 +7,13 @@ import pytest
 from test_memory_store import NOW
 
 from opensre.config import LLMSettings, MemorySettings
-from opensre.domain import Diagnosis, Finding, QuickCheck, Severity
+from opensre.domain import Diagnosis, Evidence, Finding, QuickCheck, Severity
 from opensre.memory.store import IncidentStore, Signature
 
 
-@pytest.mark.parametrize("mode", ["enabled", "disabled", "no_memory", "broken", "save_error"])
+@pytest.mark.parametrize(
+    "mode", ["enabled", "disabled", "no_memory", "broken", "save_error", "locked"]
+)
 def test_investigation_recall_save_and_failure_isolation(tmp_path, monkeypatch, caplog, mode):
     from opensre.agents import run
 
@@ -26,9 +30,14 @@ def test_investigation_recall_save_and_failure_isolation(tmp_path, monkeypatch, 
         target='["fake/prod"]',
         question="Earlier",
         signature=signature,
-        diagnosis=diagnosis.model_copy(update={"cause": "Confirmed cause"}),
+        diagnosis=diagnosis.model_copy(
+            update={
+                "cause": "Confirmed cause",
+                "evidence": [Evidence(source="logs", detail="x" * 10000)] * 10,
+            }
+        ),
     )
-    store.set_feedback(incident_id, "right")
+    store.set_feedback(incident_id, "right", "Human correction must survive the cap")
     seen = []
 
     def invoke(payload, **kwargs):
@@ -64,19 +73,24 @@ def test_investigation_recall_save_and_failure_isolation(tmp_path, monkeypatch, 
             )
         ],
     )
-    result = run.investigate(
-        "Why?",
-        [connector],
-        LLMSettings(),
-        memory=MemorySettings(dir=tmp_path, enabled=mode != "disabled"),
-        no_memory=mode == "no_memory",
-        now=lambda: NOW,
-    )
+    with closing(sqlite3.connect(tmp_path / "memory.db")) as lock:
+        if mode == "locked":
+            lock.execute("BEGIN EXCLUSIVE")
+        result = run.investigate(
+            "Why?",
+            [connector],
+            LLMSettings(),
+            memory=MemorySettings(dir=tmp_path, enabled=mode != "disabled"),
+            no_memory=mode == "no_memory",
+            now=lambda: NOW,
+        )
     assert result.summary == "Investigated"
     if mode in ("enabled", "save_error"):
         assert "Past incidents (from memory, may be outdated)" in seen[0]
         assert "Confirmed cause" in seen[0]
         assert "12 days ago" in seen[0]
+        assert "Human correction must survive the cap" in seen[0]
+        assert len(seen[0]) < 12000
     else:
         assert "Past incidents" not in seen[0]
     if mode == "enabled":
@@ -86,7 +100,7 @@ def test_investigation_recall_save_and_failure_isolation(tmp_path, monkeypatch, 
         assert saved.signature == signature
     else:
         assert result.incident_id is None
-    if mode in ("broken", "save_error"):
+    if mode in ("broken", "save_error", "locked"):
         assert "Memory" in caplog.text
     elif mode != "enabled":
         assert len(store.list_recent()) == 1

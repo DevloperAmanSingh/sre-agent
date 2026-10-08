@@ -57,6 +57,17 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class PodObservation(BaseModel):
+    name: str
+    namespace: str
+    uid: str | None
+    phase: str | None
+    created: datetime | None
+    restart_policy: str
+    containers: list[ContainerObservation]
+    conditions: list[Condition]
+
+
 class NodeSummary(BaseModel):
     name: str
     ready: bool

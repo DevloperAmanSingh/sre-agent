@@ -5,6 +5,7 @@ from opensre.connectors.kubernetes.models import (
     Condition,
     Container,
     ContainerObservation,
+    PodObservation,
     Probe,
     Termination,
 )
@@ -68,6 +69,22 @@ def container_observation(status: Any, name: str, *, init: bool = False) -> Cont
         restart_count=getattr(status, "restart_count", 0) or 0,
         current_termination=current,
         last_termination=termination(getattr(status, "last_state", None)),
+    )
+
+
+def pod_observation(pod: Any) -> PodObservation:
+    regular = as_list(pod.status.container_statuses)
+    init = as_list(pod.status.init_container_statuses)
+    return PodObservation(
+        name=pod.metadata.name,
+        namespace=pod.metadata.namespace,
+        uid=pod.metadata.uid,
+        phase=pod.status.phase,
+        created=pod.metadata.creation_timestamp,
+        restart_policy=getattr(pod.spec, "restart_policy", None) or "Always",
+        containers=[container_observation(status, status.name) for status in regular]
+        + [container_observation(status, status.name, init=True) for status in init],
+        conditions=conditions(pod.status.conditions),
     )
 
 

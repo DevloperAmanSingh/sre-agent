@@ -11,14 +11,42 @@ def run_rule(target, name):
 
 
 @pytest.mark.parametrize("init", [False, True])
-def test_crashloop_detects_current_state_in_regular_and_init_containers(init):
-    obj = pod([container_status("CrashLoopBackOff", ready=False)])
+@pytest.mark.parametrize(
+    "state,ready,previous_minutes,policy,expected",
+    [
+        ("waiting", False, 5, "Always", 1),
+        ("terminated", False, 5, "Always", 1),
+        ("running", False, 5, "Always", 0),
+        ("running", True, 5, "Always", 0),
+        ("terminated", False, None, "Always", 0),
+        ("terminated", False, 61, "Always", 0),
+        ("terminated", False, 5, "Never", 0),
+    ],
+)
+def test_crashloop_detects_current_state_in_regular_and_init_containers(
+    init, state, ready, previous_minutes, policy, expected
+):
+    previous = (
+        NS(reason="Error", exit_code=1, finished_at=NOW - timedelta(minutes=previous_minutes))
+        if previous_minutes is not None
+        else None
+    )
+    status = container_status(
+        "CrashLoopBackOff" if state == "waiting" else None, ready=ready, term=previous, restarts=99
+    )
+    status.state.terminated = (
+        NS(reason="Error", exit_code=1, finished_at=NOW) if state == "terminated" else None
+    )
+    obj = pod([status])
+    obj.spec.restart_policy = policy
     if init:
         obj.status.init_container_statuses = obj.status.container_statuses
         obj.status.container_statuses = []
     target = connector(list_namespaced_pod=lambda **kwargs: page([obj]))
     findings = run_rule(target, "crashloop")
-    assert len(findings) == 1
+    assert len(findings) == expected
+    if not expected:
+        return
     finding = findings[0]
     assert finding.severity == "critical"
     assert finding.resource == "pod/production/checkout"
@@ -112,7 +140,7 @@ def test_running_not_ready_observes_startup_grace_and_pod_readiness(
         [container_status(ready=ready)], phase=phase, created=NOW - timedelta(minutes=minutes)
     )
     if condition:
-        obj.status.conditions = [NS(type="Ready", status=condition)]
+        obj.status.conditions = [NS(type="Ready", status=condition, reason=None)]
     findings = run_rule(connector(list_namespaced_pod=lambda **kwargs: page([obj])), "not-ready")
     assert len(findings) == expected
     if expected:

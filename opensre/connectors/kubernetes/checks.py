@@ -2,50 +2,28 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from opensre.connectors.kubernetes.details import as_list, event_time, termination
-from opensre.connectors.kubernetes.models import Termination
+from opensre.connectors.kubernetes.details import event_time, pod_observation
+from opensre.connectors.kubernetes.models import ContainerObservation, PodObservation, Termination
 from opensre.connectors.kubernetes.reader import KubeReader
 from opensre.connectors.kubernetes.redaction import redact
 from opensre.domain import Evidence, Finding, QuickCheck, Severity
 from opensre.output import cap_text
 
 
-def statuses(pod: Any) -> list[Any]:
-    return as_list(pod.status.init_container_statuses) + as_list(pod.status.container_statuses)
-
-
 def finding(
-    pod: Any,
+    pod: PodObservation,
     reason: str,
     detail: str,
     severity: Severity = Severity.CRITICAL,
     source: str = "k8s_describe_pod",
 ) -> Finding:
-    resource = f"pod/{pod.metadata.namespace}/{pod.metadata.name}"
+    resource = f"pod/{pod.namespace}/{pod.name}"
     return Finding(
         resource=resource,
         reason=redact(reason) or "Unknown",
         summary=redact(f"{resource}: {reason}") or "Unknown",
         severity=severity,
-        evidence=[Evidence(source=source, detail=redact(detail) or "")],
-    )
-
-
-def waiting_failures(pod: Any, reasons: set[str]) -> list[Finding]:
-    return [
-        finding(pod, reason, f"Container {status.name} is waiting in {reason}")
-        for status in statuses(pod)
-        if (reason := getattr(getattr(status.state, "waiting", None), "reason", None)) in reasons
-    ]
-
-
-def crashloop(pod: Any, now: datetime) -> list[Finding]:
-    return waiting_failures(pod, {"CrashLoopBackOff"})
-
-
-def image_pull(pod: Any, now: datetime) -> list[Finding]:
-    return waiting_failures(
-        pod, {"ImagePullBackOff", "ErrImagePull", "InvalidImageName", "ErrImageNeverPull"}
+        evidence=[Evidence(source=source, detail=cap_text(redact(detail) or "", 2000))],
     )
 
 
@@ -53,28 +31,65 @@ def recent(timestamp: datetime | None, now: datetime) -> bool:
     return timestamp is not None and 0 <= (now - timestamp).total_seconds() <= 3600
 
 
-def terminations(status: Any) -> list[Termination]:
-    return [term for state in (status.state, status.last_state) if (term := termination(state))]
+def terminations(container: ContainerObservation) -> list[Termination]:
+    return [term for term in (container.current_termination, container.last_termination) if term]
 
 
-def oom(pod: Any, now: datetime) -> list[Finding]:
+def crashing(container: ContainerObservation, policy: str, now: datetime) -> bool:
+    if container.state_kind == "waiting" and container.state == "CrashLoopBackOff":
+        return True
+    failures = {
+        term.finished_at
+        for term in terminations(container)
+        if term.exit_code and recent(term.finished_at, now)
+    }
+    return policy == "Always" and not container.ready and len(failures) >= 2
+
+
+def crashloop(pod: PodObservation, now: datetime) -> list[Finding]:
+    return [
+        finding(
+            pod,
+            "CrashLoopBackOff",
+            f"Container {container.name}: repeated recent failed runs or CrashLoopBackOff; "
+            f"current={container.current_termination}; previous={container.last_termination}",
+        )
+        for container in pod.containers
+        if crashing(container, pod.restart_policy, now)
+    ]
+
+
+def image_pull(pod: PodObservation, now: datetime) -> list[Finding]:
+    reasons = {"ImagePullBackOff", "ErrImagePull", "InvalidImageName", "ErrImageNeverPull"}
+    return [
+        finding(
+            pod,
+            container.state or "ImagePullFailure",
+            f"Container {container.name} is waiting in {container.state}",
+        )
+        for container in pod.containers
+        if container.state_kind == "waiting" and container.state in reasons
+    ]
+
+
+def oom(pod: PodObservation, now: datetime) -> list[Finding]:
     return [
         finding(
             pod,
             "OOMKilled",
-            f"Container {status.name}: OOMKilled exit={term.exit_code} at {term.finished_at}",
+            f"Container {container.name}: OOMKilled exit={term.exit_code} at {term.finished_at}",
         )
-        for status in statuses(pod)
-        for term in terminations(status)
+        for container in pod.containers
+        for term in terminations(container)
         if term.reason == "OOMKilled" and recent(term.finished_at, now)
     ]
 
 
-def restarts(pod: Any, now: datetime) -> list[Finding]:
+def restarts(pod: PodObservation, now: datetime) -> list[Finding]:
     findings: list[Finding] = []
-    for status in statuses(pod):
-        term = termination(status.last_state)
-        if not status.restart_count or not term or not recent(term.finished_at, now):
+    for container in pod.containers:
+        term = container.last_termination
+        if not container.restart_count or not term or not recent(term.finished_at, now):
             continue
         failed = term.reason in {
             "OOMKilled",
@@ -87,7 +102,7 @@ def restarts(pod: Any, now: datetime) -> list[Finding]:
                 finding(
                     pod,
                     "RecentRestart",
-                    f"Container {status.name} restarted after {term.reason}, "
+                    f"Container {container.name} restarted after {term.reason}, "
                     f"exit={term.exit_code} at {term.finished_at}",
                     Severity.WARNING,
                 )
@@ -95,19 +110,15 @@ def restarts(pod: Any, now: datetime) -> list[Finding]:
     return findings
 
 
-def not_ready(pod: Any, now: datetime) -> list[Finding]:
-    created = pod.metadata.creation_timestamp
-    if pod.status.phase != "Running" or created is None or (now - created).total_seconds() <= 600:
+def not_ready(pod: PodObservation, now: datetime) -> list[Finding]:
+    if pod.phase != "Running" or pod.created is None or (now - pod.created).total_seconds() <= 600:
         return []
-    regular = as_list(pod.status.container_statuses)
-    ready_condition = next(
-        (condition for condition in as_list(pod.status.conditions) if condition.type == "Ready"),
-        None,
-    )
+    regular = [container for container in pod.containers if not container.init]
+    condition = next((condition for condition in pod.conditions if condition.type == "Ready"), None)
     ready = (
-        ready_condition.status == "True"
-        if ready_condition
-        else bool(regular) and all(status.ready for status in regular)
+        condition.status == "True"
+        if condition
+        else bool(regular) and all(container.ready for container in regular)
     )
     return (
         []
@@ -123,20 +134,20 @@ def not_ready(pod: Any, now: datetime) -> list[Finding]:
     )
 
 
-def pod_events(pod: Any, events: list[Any], now: datetime) -> list[Any]:
+def pod_events(pod: PodObservation, events: list[Any], now: datetime) -> list[Any]:
     return [
         event
         for event in events
         if event.involved_object.kind == "Pod"
-        and event.involved_object.name == pod.metadata.name
-        and event.metadata.namespace == pod.metadata.namespace
-        and (not event.involved_object.uid or event.involved_object.uid == pod.metadata.uid)
+        and event.involved_object.name == pod.name
+        and event.metadata.namespace == pod.namespace
+        and (not event.involved_object.uid or event.involved_object.uid == pod.uid)
         and recent(event_time(event), now)
     ]
 
 
-def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
-    if pod.status.phase != "Pending":
+def pending(pod: PodObservation, events: list[Any], now: datetime) -> list[Finding]:
+    if pod.phase != "Pending":
         return []
     scheduling = [
         event for event in pod_events(pod, events, now) if event.reason == "FailedScheduling"
@@ -147,7 +158,7 @@ def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
             finding(
                 pod,
                 event.reason,
-                cap_text(event.message or event.reason, 2000),
+                event.message or event.reason,
                 Severity.WARNING,
                 "k8s_list_events",
             )
@@ -155,7 +166,7 @@ def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
     condition = next(
         (
             condition
-            for condition in as_list(pod.status.conditions)
+            for condition in pod.conditions
             if condition.type == "PodScheduled" and condition.status == "False"
         ),
         None,
@@ -168,11 +179,9 @@ def pending(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
     ]
 
 
-def probes(pod: Any, events: list[Any], now: datetime) -> list[Finding]:
+def probes(pod: PodObservation, events: list[Any], now: datetime) -> list[Finding]:
     return [
-        finding(
-            pod, "ProbeFailure", cap_text(event.message, 2000), Severity.WARNING, "k8s_list_events"
-        )
+        finding(pod, "ProbeFailure", event.message, Severity.WARNING, "k8s_list_events")
         for event in pod_events(pod, events, now)
         if event.reason == "Unhealthy"
         and event.type == "Warning"
@@ -184,7 +193,7 @@ class Snapshot:
     def __init__(self, reader: KubeReader, core_factory: Callable[[Any], Any]) -> None:
         self.reader = reader
         self.core_factory = core_factory
-        self._pods: list[Any] | None = None
+        self._pods: list[PodObservation] | None = None
         self._events: list[Any] | None = None
 
     def pages(self, method: Callable[..., Any]) -> list[Any]:
@@ -208,9 +217,12 @@ class Snapshot:
                 raise ValueError("Kubernetes pagination repeated a continuation token")
             seen.add(token)
 
-    def pods(self, api: Any) -> list[Any]:
+    def pods(self, api: Any) -> list[PodObservation]:
         if self._pods is None:
-            self._pods = self.pages(self.core_factory(api).list_namespaced_pod)
+            self._pods = [
+                pod_observation(pod)
+                for pod in self.pages(self.core_factory(api).list_namespaced_pod)
+            ]
         return self._pods
 
     def events(self, api: Any) -> list[Any]:
@@ -225,7 +237,7 @@ def quick_checks(
     snapshot = Snapshot(reader, core_factory)
     timestamp = now()
 
-    def check(name: str, rule: Callable[[Any, datetime], list[Finding]]) -> QuickCheck:
+    def check(name: str, rule: Callable[[PodObservation, datetime], list[Finding]]) -> QuickCheck:
         def run() -> list[Finding]:
             return reader.read(
                 lambda api: [item for pod in snapshot.pods(api) for item in rule(pod, timestamp)]
@@ -235,7 +247,7 @@ def quick_checks(
 
     def run_pending() -> list[Finding]:
         def read(api: Any) -> list[Finding]:
-            pods = [pod for pod in snapshot.pods(api) if pod.status.phase == "Pending"]
+            pods = [pod for pod in snapshot.pods(api) if pod.phase == "Pending"]
             events = snapshot.events(api) if pods else []
             return [item for pod in pods for item in pending(pod, events, timestamp)]
 

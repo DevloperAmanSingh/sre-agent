@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
+from opensre.output import cap_text
+
 
 class CheckResult(BaseModel):
     name: str
@@ -13,10 +15,7 @@ class CheckResult(BaseModel):
     @field_validator("detail")
     @classmethod
     def cap_detail(cls, value: str) -> str:
-        limit = 2000
-        if len(value) > limit:
-            return f"{value[:limit]}… [{len(value) - limit} characters cut]"
-        return value
+        return cap_text(value, 2000)
 
 
 class Severity(StrEnum):

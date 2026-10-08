@@ -14,6 +14,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph  # pyright: ignore[reportMissingTypeStubs]
 
 from opensre.agents.backend import SkillsBackend
+from opensre.agents.middleware import OutputCapMiddleware
 from opensre.config import LLMSettings
 from opensre.connectors.base import Connector
 from opensre.connectors.registry import collect_tools
@@ -45,6 +46,7 @@ def build_agent(
         tools=collect_tools(connectors),
         system_prompt=(Path(__file__).parent / "prompts/system.md").read_text(),
         backend=SkillsBackend(skills_root),
+        middleware=[OutputCapMiddleware()],
         permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
         response_format=ToolStrategy(Diagnosis),
     )

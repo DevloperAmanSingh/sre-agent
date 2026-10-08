@@ -19,7 +19,7 @@ Run `make check` before each commit. Each plan step has its own branch and PR.
 
 ## Add a connector
 
-The harness contract and registry are being introduced in Step 2:
+Connectors plug into the shared harness contract and registry:
 
 1. Add `opensre/connectors/<name>/connector.py` and target-specific clients there.
 2. Implement `Connector` from `opensre/connectors/base.py`: `name`,
@@ -41,5 +41,6 @@ Add `skills/<name>/SKILL.md` with YAML frontmatter containing `name` and
 when to use it, which read-only observations to gather, and how to support a
 conclusion with evidence. Suggested fixes are advice, never actions to execute.
 
-Test that the agent discovers the skill, using a fake model without credentials.
+The harness discovers playbooks through a read-only view of the repository's `skills/`
+directory. Test that the agent discovers the skill using a fake model without credentials.
 Skills must not require write tools, shell execution, or unrestricted subagents.

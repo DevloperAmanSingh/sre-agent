@@ -16,9 +16,9 @@ from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.infrastructure import infrastructure_tools
 from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
-from opensre.connectors.kubernetes.redaction import redact
 from opensre.connectors.kubernetes.workloads import workload_tools
 from opensre.output import cap_text
+from opensre.redaction import redact
 
 Limit = Annotated[int, Field(ge=1, le=100)]
 

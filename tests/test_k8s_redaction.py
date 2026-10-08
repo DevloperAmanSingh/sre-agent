@@ -19,7 +19,7 @@ from kubernetes import client as k
     ],
 )
 def test_sensitive_text_is_redacted_before_artifact_and_content(text):
-    from opensre.connectors.kubernetes.redaction import redact
+    from opensre.redaction import redact
 
     assert "synthetic-secret" not in redact(text)
     assert "[REDACTED]" in redact(text)

@@ -15,8 +15,8 @@ from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.connector import KubernetesConnector
 
 
-@pytest.mark.parametrize("json_output", [False, True])
-def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
+@pytest.mark.parametrize("json_output,no_memory", [(False, False), (True, False), (True, True)])
+def test_ask_reads_namespaces_then_renders_diagnosis(json_output, no_memory, monkeypatch, tmp_path):
     from opensre.agents import run
     from opensre.cli import main
 
@@ -41,8 +41,16 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
         items=[SimpleNamespace(metadata=SimpleNamespace(name="default"))],
         metadata=SimpleNamespace(_continue="", remaining_item_count=0),
     )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text(
+        "contexts:\n- name: test\n  context: {cluster: test}\n"
+        "clusters:\n- name: test\n  cluster: {server: 'https://test.invalid'}\n"
+    )
+    monkeypatch.setenv("KUBECONFIG", str(kubeconfig))
+    monkeypatch.setenv("OPENSRE_MEMORY__DIR", str(tmp_path))
+    monkeypatch.setattr("opensre.memory.store.utc_now", lambda: NOW)
     connector = KubernetesConnector(
-        KubeSettings(),
+        KubeSettings(context="test"),
         client_factory=lambda settings: nullcontext(object()),
         now=lambda: NOW,
         core_factory=lambda client: SimpleNamespace(
@@ -56,12 +64,19 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
     monkeypatch.setattr(run, "build_model", lambda settings: model)
     monkeypatch.setattr(main, "build_connectors", lambda settings: [connector])
     result = CliRunner().invoke(
-        app, ["ask", "What is wrong?", *(["--json"] if json_output else [])]
+        app,
+        [
+            "ask",
+            "What is wrong?",
+            *(["--json"] if json_output else []),
+            *(["--no-memory"] if no_memory else []),
+        ],
     )
     assert result.exit_code == 0, result.output
     if json_output:
-        assert json.loads(result.stdout) == diagnosis
+        assert json.loads(result.stdout) == {**diagnosis, "incident_id": None if no_memory else 1}
     else:
+        assert "Saved as incident #1. Mark it: opensre feedback 1 --right" in result.stdout
         for text in [
             diagnosis["summary"],
             diagnosis["cause"],
@@ -69,6 +84,7 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
             "default exists",
         ]:
             assert text in result.stdout
+    assert (tmp_path / "memory.db").exists() is not no_memory
     evidence = [message for message in model.seen[-1] if isinstance(message, ToolMessage)]
     assert json.loads(evidence[0].content)["namespaces"] == ["default"]
     assert model.index == 2
@@ -162,7 +178,7 @@ def test_ask_returns_after_credential_deadline(deadline, monkeypatch):
     monkeypatch.setattr(main, "build_connectors", lambda settings: [connector])
     result = CliRunner().invoke(app, ["ask", "Investigate", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == diagnosis
+    assert json.loads(result.stdout) == {**diagnosis, "incident_id": None}
     error = next(message for message in model.seen[-1] if isinstance(message, ToolMessage))
     assert error.status == "error"
     assert "timed out after 3s" in error.content

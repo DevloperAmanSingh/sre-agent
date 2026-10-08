@@ -3,6 +3,7 @@ from typing import Any
 
 from deepagents import create_deep_agent  # pyright: ignore[reportUnknownVariableType]
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemPermission
+from deepagents.middleware.memory import MemoryMiddleware
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
@@ -16,10 +17,11 @@ from opensre.agents.backend import SkillsBackend
 from opensre.agents.lock import ToolGuardMiddleware
 from opensre.agents.middleware import OutputCapMiddleware
 from opensre.agents.model import HarnessModel
-from opensre.config import LLMSettings
+from opensre.config import LLMSettings, MemorySettings
 from opensre.connectors.registry import ToolSnapshot
 from opensre.domain import Diagnosis
 from opensre.llm import build_model
+from opensre.memory.facts import load_facts
 
 
 def resolve_skills_root() -> Path:
@@ -42,11 +44,14 @@ def build_agent(
     settings: LLMSettings | None = None,
     model: BaseChatModel | None = None,
     skills_root: Path = SKILLS_ROOT,
+    memory: MemorySettings | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     if not any(skills_root.rglob("SKILL.md")):
         raise ValueError(f"No SKILL.md playbooks found in {skills_root}")
     chat = model if model is not None else build_model(settings or LLMSettings())
-    backend = SkillsBackend(skills_root)
+    memory = memory or MemorySettings()
+    facts = load_facts(memory.dir) if memory.enabled else {}
+    backend = SkillsBackend(skills_root, facts=facts)
     middleware: list[AgentMiddleware[Any, Any]] = [
         FilesystemMiddleware(backend=backend, tools=["ls", "read_file", "glob", "grep"]),
         OutputCapMiddleware(),
@@ -54,6 +59,19 @@ def build_agent(
         ToolCallLimitMiddleware(run_limit=16, exit_behavior="error"),
         ToolGuardMiddleware(snapshot),
     ]
+    if facts:
+        middleware.append(
+            MemoryMiddleware(
+                backend=backend,
+                sources=list(facts),
+                system_prompt=(
+                    "Environment facts are human-managed reference data, read-only. "
+                    "Never try to edit them. Only deterministic harness code "
+                    "persists incident history.\n"
+                    "{agent_memory}"
+                ),
+            )
+        )
     return create_deep_agent(
         model=HarnessModel(delegate=chat),
         tools=snapshot.tools,

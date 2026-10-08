@@ -11,6 +11,7 @@ def test_quick_check_returns_typed_evidence():
     )
     check = QuickCheck(name="namespace-access", run=lambda: [finding])
     assert check.run()[0].model_dump(mode="json") == {
+        "connector": "",
         "resource": "cluster",
         "reason": "EmptyList",
         "summary": "No namespaces visible",

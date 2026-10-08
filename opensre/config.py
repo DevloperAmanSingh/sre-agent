@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_settings import (
     BaseSettings,
     InitSettingsSource,
@@ -33,12 +33,24 @@ class ConnectorSettings(BaseModel):
     kubernetes: KubeSettings = Field(default_factory=KubeSettings)
 
 
+class MemorySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    dir: Path = Field(default_factory=lambda: Path.home() / ".opensre")
+
+    @field_validator("dir")
+    @classmethod
+    def expand_dir(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="forbid", env_prefix="OPENSRE_", env_nested_delimiter="__"
     )
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
 
 
 class ConfigError(ValueError):

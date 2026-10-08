@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from opensre.cli.memory import feedback, memory_app, remember
 from opensre.config import ConfigError, Settings, load_settings
 from opensre.connectors.registry import build_connectors, collect_tools
 from opensre.doctor import diagnose_setup
@@ -13,6 +14,9 @@ from opensre.output import cap_text
 from opensre.scan import run_checks
 
 app = typer.Typer(name="opensre", help="Read-only SRE agent harness.")
+app.command()(remember)
+app.command()(feedback)
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback(invoke_without_command=True)
@@ -127,13 +131,22 @@ def ask(
     ctx: typer.Context,
     question: str,
     json_output: Annotated[bool, typer.Option("--json", help="Print a JSON diagnosis.")] = False,
+    no_memory: Annotated[
+        bool, typer.Option("--no-memory", help="Skip incident recall and save.")
+    ] = False,
 ) -> None:
     """Investigate a question using read-only tools and markdown skills."""
     settings = cast(Settings, ctx.obj)
     try:
         from opensre.agents.run import investigate
 
-        diagnosis = investigate(question, build_connectors(settings), settings.llm)
+        diagnosis = investigate(
+            question,
+            build_connectors(settings),
+            settings.llm,
+            memory=settings.memory,
+            no_memory=no_memory,
+        )
     except Exception as exc:
         typer.echo(f"Investigation failed: {cap_text(str(exc), 2000)}", err=True)
         raise typer.Exit(1) from exc
@@ -148,3 +161,8 @@ def ask(
     table.add_row("Suggested fix", diagnosis.suggested_fix)
     table.add_row("Confidence", f"{diagnosis.confidence:.0%}")
     Console().print(table)
+    if diagnosis.incident_id is not None:
+        typer.echo(
+            f"Saved as incident #{diagnosis.incident_id}. "
+            f"Mark it: opensre feedback {diagnosis.incident_id} --right"
+        )

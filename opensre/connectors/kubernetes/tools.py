@@ -5,8 +5,8 @@ from typing import Annotated, Any
 from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
-from opensre.connectors.kubernetes.details import as_list, conditions, container_details
-from opensre.connectors.kubernetes.models import PodDetail, PodLogs, PodSummary
+from opensre.connectors.kubernetes.details import as_list, conditions, container_details, event_time
+from opensre.connectors.kubernetes.models import EventSummary, PodDetail, PodLogs, PodSummary
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 from opensre.output import cap_text
 
@@ -108,7 +108,41 @@ def read_tools(reader: KubeReader, core_factory: Callable[[Any], Any]) -> list[B
         result = reader.read(read)
         return result.model_dump_json(), result
 
-    tools: list[BaseTool] = [k8s_list_pods, k8s_describe_pod, k8s_pod_logs]
+    @tool(response_format="content_and_artifact")
+    def k8s_list_events(
+        namespace: str | None = None, limit: Limit = 50
+    ) -> tuple[str, Page[EventSummary]]:
+        """Read a bounded event page, warnings first, with reason, object, count and last seen."""
+
+        def read(api: Any) -> Page[EventSummary]:
+            page = core_factory(api).list_namespaced_event(
+                namespace=namespace or reader.settings.namespace,
+                limit=limit,
+                _request_timeout=reader.settings.request_timeout_s,
+            )
+            page.items = sorted(
+                page.items,
+                key=lambda event: (
+                    event.type != "Warning",
+                    -(event_time(event) or datetime.min.replace(tzinfo=UTC)).timestamp(),
+                ),
+            )
+            return bounded_page(
+                page,
+                limit,
+                lambda event: EventSummary(
+                    type=event.type,
+                    reason=event.reason,
+                    object=f"{event.involved_object.kind}/{event.involved_object.name}",
+                    count=event.count or 1,
+                    last_seen=event_time(event),
+                ),
+            )
+
+        result = reader.read(read)
+        return result.model_dump_json(), result
+
+    tools: list[BaseTool] = [k8s_list_pods, k8s_describe_pod, k8s_pod_logs, k8s_list_events]
     for entry in tools:
         entry.metadata = {"read_only": True}
     return tools

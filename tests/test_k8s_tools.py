@@ -106,3 +106,24 @@ def test_pod_logs_request_tail_and_previous_and_cap_text(previous):
     assert result.cut == 1000
     assert result.text.endswith("[1000 characters cut]")
     assert len(result.text) < 16100
+
+
+def test_events_show_warnings_first_with_timestamps_and_counts():
+    events = [
+        k.CoreV1Event(
+            metadata=k.V1ObjectMeta(name="event"),
+            involved_object=k.V1ObjectReference(kind="Pod", name="checkout"),
+            reason=reason,
+            type=kind,
+            count=3,
+            last_timestamp=NOW,
+        )
+        for reason, kind in [("Started", "Normal"), ("Unhealthy", "Warning")]
+    ]
+    result = invoke(
+        connector(list_namespaced_event=lambda **kwargs: page(events)), "k8s_list_events"
+    )
+    assert [item.reason for item in result.items] == ["Unhealthy", "Started"]
+    assert result.items[0].object == "Pod/checkout"
+    assert result.items[0].count == 3
+    assert result.items[0].last_seen == NOW

@@ -1,6 +1,16 @@
+from datetime import datetime
 from typing import Any
 
 from opensre.connectors.kubernetes.models import Condition, Container, Probe, Termination
+
+
+def event_time(event: Any) -> datetime | None:
+    return (
+        getattr(getattr(event, "series", None), "last_observed_time", None)
+        or event.last_timestamp
+        or event.event_time
+        or event.first_timestamp
+    )
 
 
 def as_list(value: Any) -> list[Any]:

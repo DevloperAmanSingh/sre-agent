@@ -45,6 +45,14 @@ class Condition(BaseModel):
     reason: str | None
 
 
+class EventSummary(BaseModel):
+    type: str | None
+    reason: str | None
+    object: str
+    count: int
+    last_seen: datetime | None
+
+
 class PodLogs(BaseModel):
     text: str
     cut: int

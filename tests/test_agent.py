@@ -1,3 +1,4 @@
+import pytest
 from fakes.model import ScriptedModel
 from langchain_core.messages import AIMessage
 
@@ -32,3 +33,16 @@ def test_agent_binds_only_read_tools_and_returns_diagnosis(tmp_path):
     assert result["structured_response"] == Diagnosis(**diagnosis)
     assert {"ls", "read_file", "glob", "grep"} <= set(model.bound_names)
     assert not {"execute", "write_file", "edit_file", "task"} & set(model.bound_names)
+
+
+@pytest.mark.parametrize("tools_per_call", [1, 8])
+def test_agent_stops_runaway_calls(tmp_path, tools_per_call):
+    calls = [{"name": "ls", "args": {"path": "/"}, "id": str(i)} for i in range(tools_per_call)]
+    model = ScriptedModel(responses=[AIMessage(content="", tool_calls=calls)])
+    agent = build_agent([], model=model, skills_root=tmp_path)
+    with pytest.raises(Exception, match="limit"):
+        agent.invoke(
+            {"messages": [{"role": "user", "content": "Investigate"}]},
+            config={"recursion_limit": 100},
+        )
+    assert model.index <= 8

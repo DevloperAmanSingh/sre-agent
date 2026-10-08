@@ -9,6 +9,11 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.middleware.filesystem import FilesystemPermission
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph  # pyright: ignore[reportMissingTypeStubs]
@@ -41,12 +46,17 @@ def build_agent(
         excluded_tools=frozenset({"execute", "write_file", "edit_file"}),
     )
     register_harness_profile(f"{provider}:{identifier}" if identifier else provider, profile)
+    middleware: list[AgentMiddleware[Any, Any]] = [
+        OutputCapMiddleware(),
+        ModelCallLimitMiddleware(run_limit=8, exit_behavior="error"),
+        ToolCallLimitMiddleware(run_limit=16, exit_behavior="error"),
+    ]
     return create_deep_agent(
         model=chat,
         tools=collect_tools(connectors),
         system_prompt=(Path(__file__).parent / "prompts/system.md").read_text(),
         backend=SkillsBackend(skills_root),
-        middleware=[OutputCapMiddleware()],
+        middleware=middleware,
         permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
         response_format=ToolStrategy(Diagnosis),
     )

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.client import create_client
+from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
 from opensre.connectors.kubernetes.health import check_kube
 from opensre.domain import CheckResult, QuickCheck
 
@@ -45,8 +46,10 @@ class KubernetesConnector:
             limit: Annotated[int, Field(ge=1, le=100)] = 100,
         ) -> tuple[str, NamespaceList]:
             """Read namespace names; cut is null when the remaining count is unknown."""
-            try:
+
+            def read_namespaces(diagnostics: KubeDiagnostics) -> NamespaceList:
                 with self.client_factory(self.settings) as api_client:
+                    diagnostics.check_credentials()
                     page = self.core_factory(api_client).list_namespace(
                         limit=limit, _request_timeout=self.settings.request_timeout_s
                     )
@@ -55,9 +58,10 @@ class KubernetesConnector:
                 remaining = page.metadata.remaining_item_count
                 dropped = max(0, len(page.items) - limit)
                 cut = None if more and remaining is None else (remaining or 0) + dropped
-                result = NamespaceList(
-                    namespaces=names, cut=cut, more_available=more or dropped > 0
-                )
+                return NamespaceList(namespaces=names, cut=cut, more_available=more or dropped > 0)
+
+            try:
+                result = run_bounded(read_namespaces, self.settings.request_timeout_s)
                 return result.model_dump_json(), result
             except Exception as exc:
                 raise ToolException(f"Namespace read failed: {exc}") from exc

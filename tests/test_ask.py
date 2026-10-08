@@ -115,6 +115,42 @@ def test_investigation_uses_one_tool_snapshot(name, monkeypatch):
     )
 
 
+def test_ask_returns_after_credential_deadline(deadline, monkeypatch):
+    from opensre.agents import run
+    from opensre.cli import main
+
+    def credentials(settings):
+        deadline()
+        raise RuntimeError("Released credential operation")
+
+    connector = KubernetesConnector(KubeSettings(request_timeout_s=3), client_factory=credentials)
+    diagnosis = {
+        "summary": "Access timed out",
+        "cause": "Unable to gather evidence",
+        "evidence": [],
+        "suggested_fix": "Check credentials",
+        "confidence": 0.0,
+    }
+    model = ScriptedModel(
+        responses=[
+            AIMessage(
+                content="", tool_calls=[{"name": "k8s_list_namespaces", "args": {}, "id": "read"}]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"name": "Diagnosis", "args": diagnosis, "id": "answer"}]
+            ),
+        ]
+    )
+    monkeypatch.setattr(run, "build_model", lambda settings: model)
+    monkeypatch.setattr(main, "build_connectors", lambda settings: [connector])
+    result = CliRunner().invoke(app, ["ask", "Investigate", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == diagnosis
+    error = next(message for message in model.seen[-1] if isinstance(message, ToolMessage))
+    assert error.status == "error"
+    assert "timed out after 3s" in error.content
+
+
 def test_ask_missing_keys_is_a_clean_error():
     result = CliRunner().invoke(app, ["ask", "What is wrong?", "--json"])
     assert result.exit_code == 1

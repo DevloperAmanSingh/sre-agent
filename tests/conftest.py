@@ -2,6 +2,8 @@ import os
 
 import pytest
 
+pytest_plugins = ["fakes.deadline"]
+
 
 @pytest.fixture(autouse=True)
 def isolated_environment(monkeypatch, tmp_path):

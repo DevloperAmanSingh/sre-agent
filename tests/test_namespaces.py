@@ -1,5 +1,5 @@
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +37,32 @@ def test_namespace_tool_returns_bounded_typed_result(remaining, extra):
     assert result.artifact.cut == (None if remaining is None else remaining + extra)
     assert result.artifact.more_available is (remaining != 0 or extra > 0)
     assert json.loads(result.content) == result.artifact.model_dump()
+
+
+@pytest.mark.parametrize("stage", ["credentials", "request", "cleanup"])
+def test_namespace_deadline_covers_whole_operation(stage, deadline):
+    @contextmanager
+    def client_factory(settings):
+        if stage == "credentials":
+            deadline()
+        yield object()
+        if stage == "cleanup":
+            deadline()
+
+    def list_namespace(**kwargs):
+        if stage == "request":
+            deadline()
+        return SimpleNamespace(
+            items=[], metadata=SimpleNamespace(_continue="", remaining_item_count=0)
+        )
+
+    tool = KubernetesConnector(
+        KubeSettings(request_timeout_s=3),
+        client_factory=client_factory,
+        core_factory=lambda client: SimpleNamespace(list_namespace=list_namespace),
+    ).tools()[0]
+    with pytest.raises(ToolException, match="timed out after 3s"):
+        tool.invoke({})
 
 
 def test_namespace_errors_are_explicit():

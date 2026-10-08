@@ -1,7 +1,6 @@
 import json
 import logging
 from contextlib import nullcontext
-from threading import Event, current_thread
 from types import SimpleNamespace
 
 import pytest
@@ -34,45 +33,27 @@ def test_kube_result(failure):
 
 
 @pytest.mark.parametrize("stage", ["credentials", "version"])
-def test_kube_deadline(stage):
-    release = Event()
-    started = Event()
-    workers = []
-    timeout = 0.003
-
-    def slow():
-        worker = current_thread()
-        assert worker.daemon
-        workers.append(worker)
-        started.set()
-        release.wait()
-
+def test_kube_deadline(stage, deadline):
     def client_factory(settings):
         if stage == "credentials":
-            slow()
+            deadline()
         return nullcontext(object())
 
     def version_factory(client):
         def get_code(**kwargs):
             if stage == "version":
-                slow()
+                deadline()
             return SimpleNamespace(git_version="v1.35.0")
 
         return SimpleNamespace(get_code=get_code)
 
-    try:
-        result = check_kube(
-            KubeSettings(request_timeout_s=timeout),
-            client_factory=client_factory,
-            version_factory=version_factory,
-        )
-        assert not result.ok
-        assert result.detail == "timed out after 0.003s"
-    finally:
-        release.set()
-        assert started.wait(1)
-        workers[0].join(1)
-        assert not workers[0].is_alive()
+    result = check_kube(
+        KubeSettings(request_timeout_s=3),
+        client_factory=client_factory,
+        version_factory=version_factory,
+    )
+    assert not result.ok
+    assert result.detail == "timed out after 3s"
 
 
 @pytest.mark.parametrize("output", ["table", "json"])

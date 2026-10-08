@@ -137,14 +137,21 @@ def read_tools(
 
     @tool(response_format="content_and_artifact")
     def k8s_list_events(
-        namespace: str | None = None, limit: Limit = 50
+        namespace: str | None = None,
+        limit: Limit = 50,
+        warnings_only: bool = True,
+        object_name: str | None = None,
     ) -> tuple[str, Page[EventSummary]]:
-        """Read a bounded event page, warnings first, with reason, object, count and last seen."""
+        """Read events filtered by warning type and optional object name before the page limit."""
 
         def read(api: Any) -> Page[EventSummary]:
+            selectors = ["type=Warning"] if warnings_only else []
+            if object_name:
+                selectors.append(f"involvedObject.name={object_name}")
             page = core_factory(api).list_namespaced_event(
                 namespace=namespace or reader.settings.namespace,
                 limit=limit,
+                field_selector=",".join(selectors),
                 _request_timeout=remaining_timeout(),
             )
             page.items = sorted(

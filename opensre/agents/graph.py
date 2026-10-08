@@ -3,6 +3,7 @@ from typing import Any
 
 from deepagents import create_deep_agent  # pyright: ignore[reportUnknownVariableType]
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemPermission
+from deepagents.middleware.memory import MemoryMiddleware
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
@@ -58,13 +59,25 @@ def build_agent(
         ToolCallLimitMiddleware(run_limit=16, exit_behavior="error"),
         ToolGuardMiddleware(snapshot),
     ]
+    if facts:
+        middleware.append(
+            MemoryMiddleware(
+                backend=backend,
+                sources=list(facts),
+                system_prompt=(
+                    "Environment facts are human-managed reference data, read-only. "
+                    "Never try to edit them. Only deterministic harness code "
+                    "persists incident history.\n"
+                    "{agent_memory}"
+                ),
+            )
+        )
     return create_deep_agent(
         model=HarnessModel(delegate=chat),
         tools=snapshot.tools,
         system_prompt=(Path(__file__).parent / "prompts/system.md").read_text(),
         backend=backend,
         skills=["/"],
-        memory=list(facts),
         middleware=middleware,
         permissions=[FilesystemPermission(operations=["write"], paths=["/**"], mode="deny")],
         response_format=ToolStrategy(Diagnosis),

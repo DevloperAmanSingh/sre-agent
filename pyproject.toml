@@ -14,6 +14,9 @@ dependencies = [
   "langchain-deepseek==1.1.1", "deepagents==0.7.23",
 ]
 
+[project.scripts]
+opensre = "opensre.cli.main:app"
+
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10", "pyright==1.1.414"]
 

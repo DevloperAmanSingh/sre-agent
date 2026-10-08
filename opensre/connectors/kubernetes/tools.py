@@ -25,7 +25,10 @@ def pod_summary(pod: Any, now: datetime) -> PodSummary:
         namespace=pod.metadata.namespace,
         phase=pod.status.phase or "Unknown",
         ready=f"{ready}/{total}",
-        restarts=sum(status.restart_count or 0 for status in statuses),
+        restarts=sum(
+            status.restart_count or 0
+            for status in statuses + as_list(pod.status.init_container_statuses)
+        ),
         age_s=max(0, int((now - created).total_seconds())) if created else None,
         node=pod.spec.node_name,
     )

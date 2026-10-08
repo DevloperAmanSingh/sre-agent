@@ -29,6 +29,15 @@ def test_list_pods_returns_health_summary_and_uses_default_or_override_namespace
         assert result.truncation == "showing 1 of 3"
 
 
+def test_pod_listing_includes_init_container_restarts():
+    obj = pod([container_status(restarts=1)])
+    obj.status.init_container_statuses = [container_status("CrashLoopBackOff", restarts=3)]
+    row = invoke(
+        connector(list_namespaced_pod=lambda **kwargs: page([obj])), "k8s_list_pods"
+    ).items[0]
+    assert row.restarts == 4
+
+
 def test_describe_pod_includes_termination_and_specs_without_values():
     termination = k.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled", finished_at=NOW)
     obj = k.V1Pod(
@@ -296,7 +305,17 @@ def test_list_nodes_reports_readiness_pressure_resources_and_version():
 def test_rollout_history_filters_by_owner_uid_and_sorts_revisions():
     deployment = k.V1Deployment(
         metadata=k.V1ObjectMeta(name="checkout", uid="deployment-1"),
-        spec=k.V1DeploymentSpec(selector=k.V1LabelSelector(), template=k.V1PodTemplateSpec()),
+        spec=k.V1DeploymentSpec(
+            selector=k.V1LabelSelector(
+                match_labels={"app": "checkout"},
+                match_expressions=[
+                    k.V1LabelSelectorRequirement(
+                        key="track", operator="In", values=["stable", "canary"]
+                    )
+                ],
+            ),
+            template=k.V1PodTemplateSpec(),
+        ),
     )
 
     def replica(revision, uid):
@@ -327,12 +346,14 @@ def test_rollout_history_filters_by_owner_uid_and_sorts_revisions():
             ),
         )
 
+    def list_replicas(**kwargs):
+        assert kwargs["label_selector"] == "app=checkout,track in (stable,canary)"
+        return page([replica(2, "deployment-1"), replica(1, "deployment-1"), replica(3, "other")])
+
     result = invoke(
         connector(
             read_namespaced_deployment=lambda **kwargs: deployment,
-            list_namespaced_replica_set=lambda **kwargs: page(
-                [replica(2, "deployment-1"), replica(1, "deployment-1"), replica(3, "other")]
-            ),
+            list_namespaced_replica_set=list_replicas,
         ),
         "k8s_rollout_history",
         name="checkout",

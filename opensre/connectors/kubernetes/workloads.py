@@ -9,6 +9,20 @@ from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSum
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page, bounded_response
 
 
+def label_selector(selector: Any) -> str:
+    labels: dict[str, str] = selector.match_labels or {}
+    parts = [f"{key}={value}" for key, value in sorted(labels.items())]
+    for expression in as_list(selector.match_expressions):
+        if expression.operator in {"In", "NotIn"}:
+            operator = "in" if expression.operator == "In" else "notin"
+            parts.append(f"{expression.key} {operator} ({','.join(expression.values or [])})")
+        elif expression.operator == "Exists":
+            parts.append(expression.key)
+        elif expression.operator == "DoesNotExist":
+            parts.append(f"!{expression.key}")
+    return ",".join(parts)
+
+
 def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> list[BaseTool]:
     @tool(response_format="content_and_artifact")
     def k8s_list_deployments(
@@ -82,7 +96,10 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
                 name=name, namespace=ns, _request_timeout=timeout
             )
             page = apps.list_namespaced_replica_set(
-                namespace=ns, limit=limit, _request_timeout=timeout
+                namespace=ns,
+                limit=limit,
+                label_selector=label_selector(deployment.spec.selector),
+                _request_timeout=timeout,
             )
 
             def revision(replica: Any) -> Revision:

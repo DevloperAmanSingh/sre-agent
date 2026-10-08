@@ -8,6 +8,7 @@ from langchain_core.tools import BaseTool, ToolException, tool
 from pydantic import BaseModel, Field
 
 from opensre.config import KubeSettings
+from opensre.connectors.kubernetes.checks import quick_checks
 from opensre.connectors.kubernetes.client import create_client
 from opensre.connectors.kubernetes.execution import KubeDiagnostics, run_bounded
 from opensre.connectors.kubernetes.health import check_kube
@@ -85,4 +86,6 @@ class KubernetesConnector:
         ]
 
     def checks(self) -> list[QuickCheck]:
-        return []
+        return quick_checks(
+            KubeReader(self.settings, self.client_factory), self.core_factory, self.now
+        )

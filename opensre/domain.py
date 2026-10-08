@@ -21,6 +21,7 @@ class CheckResult(BaseModel):
 class Severity(StrEnum):
     WARNING = "warning"
     CRITICAL = "critical"
+    INFO = "info"
 
 
 class Evidence(BaseModel):
@@ -29,6 +30,8 @@ class Evidence(BaseModel):
 
 
 class Finding(BaseModel):
+    resource: str
+    reason: str
     summary: str
     severity: Severity
     evidence: list[Evidence]

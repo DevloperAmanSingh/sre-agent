@@ -6,26 +6,12 @@ from time import perf_counter
 from typing import Any, cast
 
 from kubernetes import client  # pyright: ignore[reportMissingTypeStubs]
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, computed_field
 
 from opensre.config import KubeSettings, LLMSettings
 from opensre.connectors.kubernetes.client import create_client
+from opensre.domain import CheckResult
 from opensre.llm import configured_models, litellm, validate_keys, validate_model
-
-
-class CheckResult(BaseModel):
-    name: str
-    ok: bool
-    detail: str
-    latency_s: float | None = None
-
-    @field_validator("detail")
-    @classmethod
-    def cap_detail(cls, value: str) -> str:
-        limit = 2000
-        if len(value) > limit:
-            return f"{value[:limit]}… [{len(value) - limit} characters cut]"
-        return value
 
 
 class DoctorReport(BaseModel):

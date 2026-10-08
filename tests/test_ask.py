@@ -3,8 +3,10 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
+from fakes.kubernetes import container_status, pod
+from fakes.kubernetes import page as kube_page
 from fakes.model import ScriptedModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from typer.testing import CliRunner
 
@@ -42,7 +44,13 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
     connector = KubernetesConnector(
         KubeSettings(),
         client_factory=lambda settings: nullcontext(object()),
-        core_factory=lambda client: SimpleNamespace(list_namespace=lambda **kwargs: page),
+        core_factory=lambda client: SimpleNamespace(
+            list_namespace=lambda **kwargs: page,
+            list_namespaced_pod=lambda **kwargs: kube_page(
+                [pod([container_status("CrashLoopBackOff")])]
+            ),
+            list_namespaced_event=lambda **kwargs: kube_page([]),
+        ),
     )
     monkeypatch.setattr(run, "build_model", lambda settings: model)
     monkeypatch.setattr(main, "build_connectors", lambda settings: [connector])
@@ -63,6 +71,10 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, monkeypatch):
     evidence = [message for message in model.seen[-1] if isinstance(message, ToolMessage)]
     assert json.loads(evidence[0].content)["namespaces"] == ["default"]
     assert model.index == 2
+    question = next(message for message in model.seen[0] if isinstance(message, HumanMessage))
+    assert "What is wrong?" in question.content
+    assert "CrashLoopBackOff" in question.content
+    assert "pod/production/checkout" in question.content
 
 
 @pytest.mark.parametrize("name", ["task", "write_file", "edit_file", "execute"])
@@ -104,7 +116,9 @@ def test_investigation_uses_one_tool_snapshot(name, monkeypatch):
     )
     monkeypatch.setattr(run, "build_model", lambda settings: model)
     result = run.investigate(
-        "Investigate", [SimpleNamespace(name="fake", tools=changing_tools)], LLMSettings()
+        "Investigate",
+        [SimpleNamespace(name="fake", tools=changing_tools, checks=lambda: [])],
+        LLMSettings(),
     )
     assert result.summary == "Safe"
     assert len(calls) == 1

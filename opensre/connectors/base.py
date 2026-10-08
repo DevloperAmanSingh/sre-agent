@@ -8,6 +8,9 @@ from opensre.domain import CheckResult, QuickCheck
 class Connector(Protocol):
     name: str
 
+    @property
+    def target(self) -> str: ...
+
     def health(self) -> CheckResult: ...
 
     def tools(self) -> list[BaseTool]: ...

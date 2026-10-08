@@ -1,11 +1,25 @@
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from kubernetes import client, config  # pyright: ignore[reportMissingTypeStubs]
 
 from opensre.config import KubeSettings
+
+
+def target_identity(settings: KubeSettings) -> str:
+    if settings.context:
+        return f"kubernetes/{settings.context}"
+    path = os.environ.get("KUBECONFIG") or str(Path.home() / ".kube/config")
+    loader = cast(Callable[..., tuple[Any, Any]], getattr(config, "list_kube_config_contexts"))
+    try:
+        _, current = loader(config_file=path)
+        if current and current.get("name"):
+            return f"kubernetes/{current['name']}"
+    except Exception as exc:
+        raise ValueError("Cannot resolve Kubernetes target identity; set a context") from exc
+    raise ValueError("Cannot resolve Kubernetes target identity; set a context")
 
 
 def create_client(

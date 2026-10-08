@@ -5,7 +5,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from opensre.connectors.kubernetes.details import as_list, conditions, container_details
-from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary
+from opensre.connectors.kubernetes.models import DeploymentDetail, DeploymentSummary, Revision
 from opensre.connectors.kubernetes.reader import KubeReader, Page, bounded_page
 
 
@@ -68,4 +68,52 @@ def workload_tools(reader: KubeReader, apps_factory: Callable[[Any], Any]) -> li
         result = reader.read(read)
         return result.model_dump_json(), result
 
-    return [k8s_list_deployments, k8s_describe_deployment]
+    @tool(response_format="content_and_artifact")
+    def k8s_rollout_history(
+        name: str, namespace: str | None = None, limit: Annotated[int, Field(ge=1, le=100)] = 50
+    ) -> tuple[str, Page[Revision]]:
+        """Read owned ReplicaSet revisions, change causes and images from a bounded page."""
+
+        def read(api: Any) -> Page[Revision]:
+            apps = apps_factory(api)
+            ns = namespace or reader.settings.namespace
+            timeout = reader.settings.request_timeout_s
+            deployment = apps.read_namespaced_deployment(
+                name=name, namespace=ns, _request_timeout=timeout
+            )
+            page = apps.list_namespaced_replica_set(
+                namespace=ns, limit=limit, _request_timeout=timeout
+            )
+
+            def revision(replica: Any) -> Revision:
+                annotations: dict[str, str] = replica.metadata.annotations or {}
+                value = annotations.get("deployment.kubernetes.io/revision", "")
+                specs = as_list(replica.spec.template.spec.containers)
+                return Revision(
+                    revision=int(value) if value.isdigit() else None,
+                    change_cause=annotations.get("kubernetes.io/change-cause"),
+                    images=[spec.image for spec in specs[:50]],
+                    images_cut=max(0, len(specs) - 50),
+                )
+
+            result = bounded_page(page, limit, revision)
+            result.items = [
+                row
+                for replica, row in zip(page.items[:limit], result.items, strict=True)
+                if any(
+                    owner.uid == deployment.metadata.uid
+                    and owner.kind == "Deployment"
+                    and owner.controller
+                    for owner in as_list(replica.metadata.owner_references)
+                )
+            ]
+            result.items.sort(key=lambda row: row.revision or 0)
+            result.truncation = (
+                f"Matched {len(result.items)} revisions; ReplicaSets {result.truncation}"
+            )
+            return result
+
+        result = reader.read(read)
+        return result.model_dump_json(), result
+
+    return [k8s_list_deployments, k8s_describe_deployment, k8s_rollout_history]

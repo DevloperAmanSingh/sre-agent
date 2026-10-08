@@ -70,6 +70,13 @@ class ServiceSummary(BaseModel):
     ready_endpoints: int
 
 
+class Revision(BaseModel):
+    revision: int | None
+    change_cause: str | None
+    images: list[str]
+    images_cut: int
+
+
 class DeploymentSummary(BaseModel):
     name: str
     desired: int

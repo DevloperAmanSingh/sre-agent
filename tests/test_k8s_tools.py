@@ -264,3 +264,52 @@ def test_list_nodes_reports_readiness_pressure_resources_and_version():
     assert row.capacity == {"cpu": "4"}
     assert row.allocatable == {"cpu": "3"}
     assert row.version == "v1.35.0"
+
+
+def test_rollout_history_filters_by_owner_uid_and_sorts_revisions():
+    deployment = k.V1Deployment(
+        metadata=k.V1ObjectMeta(name="checkout", uid="deployment-1"),
+        spec=k.V1DeploymentSpec(selector=k.V1LabelSelector(), template=k.V1PodTemplateSpec()),
+    )
+
+    def replica(revision, uid):
+        return k.V1ReplicaSet(
+            metadata=k.V1ObjectMeta(
+                name=f"checkout-{revision}",
+                annotations={
+                    "deployment.kubernetes.io/revision": str(revision),
+                    "kubernetes.io/change-cause": f"release {revision}",
+                },
+                owner_references=[
+                    k.V1OwnerReference(
+                        api_version="apps/v1",
+                        kind="Deployment",
+                        name="checkout",
+                        uid=uid,
+                        controller=True,
+                    )
+                ],
+            ),
+            spec=k.V1ReplicaSetSpec(
+                selector=k.V1LabelSelector(),
+                template=k.V1PodTemplateSpec(
+                    spec=k.V1PodSpec(
+                        containers=[k.V1Container(name="app", image=f"app:{revision}")]
+                    )
+                ),
+            ),
+        )
+
+    result = invoke(
+        connector(
+            read_namespaced_deployment=lambda **kwargs: deployment,
+            list_namespaced_replica_set=lambda **kwargs: page(
+                [replica(2, "deployment-1"), replica(1, "deployment-1"), replica(3, "other")]
+            ),
+        ),
+        "k8s_rollout_history",
+        name="checkout",
+    )
+    assert [row.revision for row in result.items] == [1, 2]
+    assert result.items[1].images == ["app:2"]
+    assert result.items[1].change_cause == "release 2"

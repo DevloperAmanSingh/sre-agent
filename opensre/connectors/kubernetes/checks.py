@@ -176,7 +176,10 @@ def pod_events(pod: PodObservation, events: list[Any], now: datetime) -> list[An
 
 
 def pending(pod: PodObservation, events: list[Any], now: datetime) -> list[Finding]:
-    if pod.phase != "Pending":
+    condition = next(
+        (condition for condition in pod.conditions if condition.type == "PodScheduled"), None
+    )
+    if pod.phase != "Pending" or (condition and condition.status == "True"):
         return []
     scheduling = [
         event for event in pod_events(pod, events, now) if event.reason == "FailedScheduling"
@@ -192,18 +195,15 @@ def pending(pod: PodObservation, events: list[Any], now: datetime) -> list[Findi
                 "k8s_list_events",
             )
         ]
-    condition = next(
-        (
-            condition
-            for condition in pod.conditions
-            if condition.type == "PodScheduled" and condition.status == "False"
-        ),
-        None,
-    )
     reason = condition.reason if condition and condition.reason else "Pending"
     return [
         finding(
-            pod, reason, "Pod is Pending; no recent scheduling event available", Severity.WARNING
+            pod,
+            reason,
+            condition.message
+            if condition and condition.message
+            else "Pod is Pending; no recent scheduling event available",
+            Severity.WARNING,
         )
     ]
 

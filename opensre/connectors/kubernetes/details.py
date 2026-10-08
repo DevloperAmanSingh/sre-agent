@@ -27,7 +27,12 @@ def as_list(value: Any) -> list[Any]:
 
 def conditions(items: list[Any] | None) -> list[Condition]:
     return [
-        Condition(type=item.type, status=item.status, reason=redact(item.reason))
+        Condition(
+            type=item.type,
+            status=item.status,
+            reason=redact(item.reason),
+            message=redact(getattr(item, "message", None)),
+        )
         for item in (items or [])[:50]
     ]
 

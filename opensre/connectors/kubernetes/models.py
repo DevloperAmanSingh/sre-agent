@@ -52,6 +52,7 @@ class Container(ContainerObservation):
 
 
 class Condition(BaseModel):
+    message: str | None = None
     type: str
     status: str
     reason: str | None

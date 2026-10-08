@@ -125,15 +125,39 @@ def event(
 
 
 @pytest.mark.parametrize(
-    "uid,minutes,expected",
-    [("pod-1", 5, "FailedScheduling"), ("old-pod", 5, "Pending"), ("pod-1", 61, "Pending")],
+    "uid,minutes,scheduled,expected",
+    [
+        ("pod-1", 5, None, "FailedScheduling"),
+        ("old-pod", 5, None, "Pending"),
+        ("pod-1", 61, None, "Pending"),
+        ("pod-1", 5, "True", None),
+        ("pod-1", 61, "False", "Unschedulable"),
+    ],
 )
-def test_pending_includes_current_scheduling_event_reason(uid, minutes, expected):
+def test_pending_includes_current_scheduling_event_reason(uid, minutes, scheduled, expected):
+    obj = pod([container_status("ImagePullBackOff")], phase="Pending")
+    if scheduled:
+        obj.status.conditions = [
+            NS(
+                type="PodScheduled",
+                status=scheduled,
+                reason="Unschedulable",
+                message="insufficient CPU; token=synthetic-secret",
+            )
+        ]
     target = connector(
-        list_namespaced_pod=lambda **kwargs: page([pod(phase="Pending")]),
+        list_namespaced_pod=lambda **kwargs: page([obj]),
         list_namespaced_event=lambda **kwargs: page([event(uid=uid, minutes=minutes)]),
     )
-    finding = run_rule(target, "pending")[0]
+    findings = run_rule(target, "pending")
+    if expected is None:
+        assert findings == []
+        assert len(run_rule(target, "image-pull")) == 1
+        return
+    finding = findings[0]
+    if expected == "Unschedulable":
+        assert "insufficient CPU" in finding.evidence[0].detail
+        assert "synthetic-secret" not in finding.model_dump_json()
     assert finding.severity == "warning"
     assert finding.reason == expected
     if expected == "FailedScheduling":

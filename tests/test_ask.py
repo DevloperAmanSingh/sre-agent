@@ -41,6 +41,12 @@ def test_ask_reads_namespaces_then_renders_diagnosis(json_output, no_memory, mon
         items=[SimpleNamespace(metadata=SimpleNamespace(name="default"))],
         metadata=SimpleNamespace(_continue="", remaining_item_count=0),
     )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text(
+        "contexts:\n- name: test\n  context: {cluster: test}\n"
+        "clusters:\n- name: test\n  cluster: {server: 'https://test.invalid'}\n"
+    )
+    monkeypatch.setenv("KUBECONFIG", str(kubeconfig))
     monkeypatch.setenv("OPENSRE_MEMORY__DIR", str(tmp_path))
     monkeypatch.setattr("opensre.memory.store.utc_now", lambda: NOW)
     connector = KubernetesConnector(

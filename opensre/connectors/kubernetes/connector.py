@@ -9,7 +9,7 @@ from pydantic import Field, computed_field
 
 from opensre.config import KubeSettings
 from opensre.connectors.kubernetes.checks import quick_checks
-from opensre.connectors.kubernetes.client import create_client, target_identity
+from opensre.connectors.kubernetes.client import ClientSource
 from opensre.connectors.kubernetes.execution import remaining_timeout
 from opensre.connectors.kubernetes.health import check_kube
 from opensre.connectors.kubernetes.reader import (
@@ -35,14 +35,15 @@ class KubernetesConnector:
         self,
         settings: KubeSettings,
         *,
-        client_factory: Callable[[KubeSettings], AbstractContextManager[Any]] = create_client,
+        client_factory: Callable[[KubeSettings], AbstractContextManager[Any]] | None = None,
         core_factory: Callable[[Any], Any] = client.CoreV1Api,
         version_factory: Callable[[Any], Any] = client.VersionApi,
         apps_factory: Callable[[Any], Any] = client.AppsV1Api,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.settings = settings
-        self.client_factory = client_factory
+        self.source = ClientSource(settings)
+        self.client_factory = client_factory or self.source.create
         self.core_factory = core_factory
         self.version_factory = version_factory
         self.apps_factory = apps_factory
@@ -50,7 +51,7 @@ class KubernetesConnector:
 
     @property
     def target(self) -> str:
-        return target_identity(self.settings)
+        return self.source.target
 
     def health(self) -> CheckResult:
         return check_kube(
